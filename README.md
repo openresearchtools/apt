@@ -14,7 +14,7 @@ The architecture-independent keyring package installs both the public archive
 key and the APT source definition:
 
 ```bash
-curl -fsSLo /tmp/openresearchtools-archive-keyring.deb \
+wget -qO /tmp/openresearchtools-archive-keyring.deb \
   https://apt.openresearchtools.com/apt/releases/download/repo/openresearchtools-archive-keyring.deb
 sudo apt install /tmp/openresearchtools-archive-keyring.deb
 sudo apt update
@@ -61,7 +61,7 @@ Do not combine this method with the keyring-package method above.
 
 ```bash
 sudo install -d -m 0755 /etc/apt/keyrings
-curl -fsSL \
+wget -qO- \
   https://apt.openresearchtools.com/apt/releases/download/repo/openresearchtools-archive-keyring.gpg \
   | sudo tee /etc/apt/keyrings/openresearchtools-archive-keyring.gpg >/dev/null
 sudo chmod 0644 /etc/apt/keyrings/openresearchtools-archive-keyring.gpg
