@@ -14,9 +14,8 @@ The architecture-independent keyring package installs both the public archive
 key and the APT source definition:
 
 ```bash
-wget -qO /tmp/openresearchtools-archive-keyring.deb \
-  https://apt.openresearchtools.com/apt/releases/download/repo/openresearchtools-archive-keyring.deb
-sudo apt install /tmp/openresearchtools-archive-keyring.deb
+wget -qO /tmp/keyring.deb https://keyring.openresearchtools.com
+sudo apt install /tmp/keyring.deb
 sudo apt update
 sudo apt install gnozzard
 sudo apt install pdf-markdown-studio
