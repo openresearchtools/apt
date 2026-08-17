@@ -1,0 +1,6 @@
+[
+  {
+    "repository": "openresearchtools/gnozzard",
+    "asset_glob": "*.deb"
+  }
+]

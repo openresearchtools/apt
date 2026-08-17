@@ -4,3 +4,5 @@
 *-primary-backup.gpg
 *-ci-signing-subkey.gpg
 
+# Generated repository output.
+_site/
