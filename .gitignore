@@ -1,0 +1,6 @@
+# Signing-key material must never be committed.
+*.key
+*.private
+*-primary-backup.gpg
+*-ci-signing-subkey.gpg
+
