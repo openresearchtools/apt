@@ -4,10 +4,12 @@ set -euo pipefail
 umask 022
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-output_dir="${OUTPUT_DIR:-$repository_root/_site}"
+output_dir="${OUTPUT_DIR:-$repository_root/_repo}"
 work_dir="$(mktemp -d)"
 gnupg_home="$(mktemp -d)"
 archive_url="${APT_REPOSITORY_URL:-https://apt.openresearchtools.com}"
+metadata_suite="${APT_METADATA_SUITE:-apt/releases/download/repo/}"
+github_organization="${GITHUB_ORGANIZATION:-openresearchtools}"
 keyring_version="${KEYRING_VERSION:-2026.08.17}"
 archive_fingerprint="$(tr -d '[:space:]' < "$repository_root/keys/fingerprint.txt")"
 
@@ -23,7 +25,9 @@ require_command() {
   fi
 }
 
-for command_name in apt-ftparchive base64 dpkg-deb dpkg-scanpackages gh gpg gpgv gzip jq; do
+for command_name in \
+  apt-ftparchive base64 dpkg-deb dpkg-scanpackages dpkg-scansources \
+  gh gpg gpgv gzip jq md5sum sha1sum sha256sum; do
   require_command "$command_name"
 done
 
@@ -35,25 +39,107 @@ case "$archive_url" in
     ;;
 esac
 
+if [[ "$metadata_suite" == /* || "$metadata_suite" != */ ]]; then
+  printf 'APT_METADATA_SUITE must be a relative path ending in /: %s\n' \
+    "$metadata_suite" >&2
+  exit 1
+fi
+
 find "$output_dir" -mindepth 1 -depth -delete 2>/dev/null || true
-mkdir -p "$output_dir/pool/main"
+mkdir -p "$output_dir"
+: > "$output_dir/Packages"
+: > "$output_dir/Sources"
+
+declare -A indexed_binary_versions=()
+
+append_binary_records() {
+  local package_dir="$1"
+  local archive_prefix="$2"
+  local records_file="$work_dir/binary-records.$RANDOM"
+  local package_file package_name package_version package_architecture identity
+
+  while IFS= read -r -d '' package_file; do
+    package_name="$(dpkg-deb --field "$package_file" Package)"
+    package_version="$(dpkg-deb --field "$package_file" Version)"
+    package_architecture="$(dpkg-deb --field "$package_file" Architecture)"
+
+    if [[ ! "$package_name" =~ ^[a-z0-9][a-z0-9+.-]+$ ]]; then
+      printf 'Invalid package name in %s: %s\n' "$package_file" "$package_name" >&2
+      exit 1
+    fi
+    if [[ ! "$package_architecture" =~ ^(all|amd64|arm64)$ ]]; then
+      printf 'Unsupported package architecture in %s: %s\n' \
+        "$package_file" "$package_architecture" >&2
+      exit 1
+    fi
+
+    identity="$package_name|$package_version|$package_architecture"
+    if [[ -n "${indexed_binary_versions[$identity]:-}" ]]; then
+      printf 'Duplicate package/version/architecture: %s\n' "$identity" >&2
+      exit 1
+    fi
+    indexed_binary_versions[$identity]="$package_file"
+  done < <(find "$package_dir" -maxdepth 1 -type f -name '*.deb' -print0 | sort -z)
+
+  (
+    cd "$package_dir"
+    dpkg-scanpackages --multiversion . /dev/null
+  ) > "$records_file"
+
+  if [[ ! -s "$records_file" ]]; then
+    printf 'No Debian binary packages found in %s\n' "$package_dir" >&2
+    exit 1
+  fi
+
+  awk -v prefix="$archive_prefix" '
+    /^Filename: \.\// {
+      sub(/^Filename: \.\//, "Filename: " prefix "/")
+    }
+    { print }
+  ' "$records_file" >> "$output_dir/Packages"
+}
+
+append_source_records() {
+  local source_dir="$1"
+  local archive_prefix="$2"
+  local records_file="$work_dir/source-records.$RANDOM"
+
+  (
+    cd "$source_dir"
+    dpkg-scansources . /dev/null
+  ) > "$records_file"
+
+  if [[ ! -s "$records_file" ]]; then
+    printf 'No Debian source packages found in %s\n' "$source_dir" >&2
+    exit 1
+  fi
+
+  awk -v prefix="$archive_prefix" '
+    /^Directory:/ {
+      print "Directory: " prefix
+      next
+    }
+    { print }
+  ' "$records_file" >> "$output_dir/Sources"
+}
 
 keyring_root="$work_dir/keyring-root"
+keyring_packages="$work_dir/keyring-packages"
 mkdir -p \
   "$keyring_root/DEBIAN" \
   "$keyring_root/etc/apt/sources.list.d" \
   "$keyring_root/usr/share/doc/openresearchtools-archive-keyring" \
-  "$keyring_root/usr/share/keyrings"
+  "$keyring_root/usr/share/keyrings" \
+  "$keyring_packages"
 
 install -m 0644 \
   "$repository_root/keys/openresearchtools-archive-keyring.gpg" \
   "$keyring_root/usr/share/keyrings/openresearchtools-archive-keyring.gpg"
 
 cat > "$keyring_root/etc/apt/sources.list.d/openresearchtools.sources" <<EOF
-Types: deb
+Types: deb deb-src
 URIs: $archive_url
-Suites: stable
-Components: main
+Suites: $metadata_suite
 Signed-By: /usr/share/keyrings/openresearchtools-archive-keyring.gpg
 EOF
 
@@ -78,7 +164,7 @@ EOF
 cat > "$work_dir/changelog" <<EOF
 openresearchtools-archive-keyring ($keyring_version) stable; urgency=medium
 
-  * Install the initial Open Research Tools archive key and source.
+  * Install the Open Research Tools archive key and source.
 
  -- Open Research Tools <openresearchtools@users.noreply.github.com>  Mon, 17 Aug 2026 00:00:00 +0000
 EOF
@@ -97,78 +183,56 @@ License: CC0-1.0
  without restriction under the Creative Commons CC0 1.0 Universal dedication.
 EOF
 
-keyring_deb="$work_dir/openresearchtools-archive-keyring_${keyring_version}_all.deb"
+keyring_filename="openresearchtools-archive-keyring_${keyring_version}_all.deb"
+keyring_deb="$keyring_packages/$keyring_filename"
 dpkg-deb --root-owner-group --build "$keyring_root" "$keyring_deb" >/dev/null
-
-add_deb_to_pool() {
-  local source_deb="$1"
-  local package_name package_version package_architecture first_letter destination
-
-  package_name="$(dpkg-deb --field "$source_deb" Package)"
-  package_version="$(dpkg-deb --field "$source_deb" Version)"
-  package_architecture="$(dpkg-deb --field "$source_deb" Architecture)"
-
-  if [[ ! "$package_name" =~ ^[a-z0-9][a-z0-9+.-]+$ ]]; then
-    printf 'Invalid package name in %s: %s\n' "$source_deb" "$package_name" >&2
-    exit 1
-  fi
-  if [[ ! "$package_architecture" =~ ^(all|amd64|arm64)$ ]]; then
-    printf 'Unsupported package architecture in %s: %s\n' \
-      "$source_deb" "$package_architecture" >&2
-    exit 1
-  fi
-
-  first_letter="${package_name:0:1}"
-  destination="$output_dir/pool/main/$first_letter/$package_name"
-  mkdir -p "$destination"
-  install -m 0644 "$source_deb" \
-    "$destination/${package_name}_${package_version}_${package_architecture}.deb"
-}
-
-add_deb_to_pool "$keyring_deb"
+append_binary_records "$keyring_packages" "apt/releases/download/repo"
+install -m 0644 "$keyring_deb" "$output_dir/$keyring_filename"
 install -m 0644 "$keyring_deb" "$output_dir/openresearchtools-archive-keyring.deb"
 
 while IFS= read -r package_spec; do
   package_repository="$(jq -r '.repository' <<<"$package_spec")"
-  asset_glob="$(jq -r '.asset_glob' <<<"$package_spec")"
+  binary_asset_glob="$(jq -r '.binary_asset_glob // .asset_glob // empty' \
+    <<<"$package_spec")"
   download_dir="$(mktemp -d "$work_dir/download.XXXXXX")"
 
-  if [[ ! "$package_repository" =~ ^openresearchtools/[A-Za-z0-9_.-]+$ ]]; then
+  if [[ ! "$package_repository" =~ ^$github_organization/[A-Za-z0-9_.-]+$ ]]; then
     printf 'Invalid configured GitHub repository: %s\n' "$package_repository" >&2
     exit 1
   fi
-
-  release_tag="$(gh api "repos/$package_repository/releases/latest" --jq '.tag_name')"
-  printf 'Downloading %s release %s (%s)\n' \
-    "$package_repository" "$release_tag" "$asset_glob"
-  gh release download "$release_tag" --repo "$package_repository" \
-    --pattern "$asset_glob" --dir "$download_dir"
-
-  downloaded=0
-  while IFS= read -r -d '' package_file; do
-    add_deb_to_pool "$package_file"
-    downloaded=$((downloaded + 1))
-  done < <(find "$download_dir" -maxdepth 1 -type f -name '*.deb' -print0)
-
-  if [[ "$downloaded" -eq 0 ]]; then
-    printf 'No Debian packages downloaded from %s release %s\n' \
-      "$package_repository" "$release_tag" >&2
+  if [[ -z "$binary_asset_glob" ]]; then
+    printf 'No binary_asset_glob configured for %s\n' "$package_repository" >&2
     exit 1
   fi
+
+  repository_name="${package_repository#*/}"
+  release_tag="$(gh api "repos/$package_repository/releases/latest" --jq '.tag_name')"
+  if [[ ! "$release_tag" =~ ^[A-Za-z0-9._+~-]+$ ]]; then
+    printf 'Release tag contains unsupported URL characters: %s\n' "$release_tag" >&2
+    exit 1
+  fi
+  archive_prefix="$repository_name/releases/download/$release_tag"
+
+  printf 'Indexing %s release %s\n' "$package_repository" "$release_tag"
+  gh release download "$release_tag" --repo "$package_repository" \
+    --pattern "$binary_asset_glob" --dir "$download_dir"
+  append_binary_records "$download_dir" "$archive_prefix"
+
+  source_patterns="$(jq -r '.source_asset_globs[]? // empty' <<<"$package_spec")"
+  if [[ -z "$source_patterns" ]]; then
+    printf 'No source_asset_globs configured for %s\n' "$package_repository" >&2
+    exit 1
+  fi
+  while IFS= read -r source_pattern; do
+    gh release download "$release_tag" --repo "$package_repository" \
+      --pattern "$source_pattern" --dir "$download_dir"
+  done <<< "$source_patterns"
+  append_source_records "$download_dir" "$archive_prefix"
 done < <(jq -c '.[]' "$repository_root/packages.json")
 
-for architecture in amd64 arm64; do
-  binary_dir="$output_dir/dists/stable/main/binary-$architecture"
-  mkdir -p "$binary_dir"
-  (
-    cd "$output_dir"
-    dpkg-scanpackages --arch "$architecture" --multiversion pool /dev/null \
-      > "dists/stable/main/binary-$architecture/Packages"
-  )
-  gzip -n -9 -c "$binary_dir/Packages" > "$binary_dir/Packages.gz"
-done
+gzip -n -9 -c "$output_dir/Packages" > "$output_dir/Packages.gz"
+gzip -n -9 -c "$output_dir/Sources" > "$output_dir/Sources.gz"
 
-release_file="$output_dir/dists/stable/Release"
 temporary_release="$work_dir/Release"
 (
   cd "$output_dir"
@@ -178,18 +242,15 @@ temporary_release="$work_dir/Release"
     -o APT::FTPArchive::Release::Suite='stable' \
     -o APT::FTPArchive::Release::Codename='stable' \
     -o APT::FTPArchive::Release::Architectures='amd64 arm64' \
-    -o APT::FTPArchive::Release::Components='main' \
     -o APT::FTPArchive::Release::Description='Open Research Tools packages' \
-    release dists/stable > "$temporary_release"
+    release . > "$temporary_release"
 )
-install -m 0644 "$temporary_release" "$release_file"
+install -m 0644 "$temporary_release" "$output_dir/Release"
 
 install -m 0644 "$repository_root/keys/openresearchtools-archive-keyring.gpg" \
   "$output_dir/openresearchtools-archive-keyring.gpg"
 install -m 0644 "$repository_root/keys/openresearchtools-archive-keyring.asc" \
   "$output_dir/openresearchtools-archive-keyring.asc"
-install -m 0644 "$repository_root/site/index.html" "$output_dir/index.html"
-touch "$output_dir/.nojekyll"
 
 if [[ "${SKIP_SIGNING:-0}" == "1" ]]; then
   printf 'Skipping repository signing because SKIP_SIGNING=1\n'
@@ -209,12 +270,12 @@ gpg --batch --yes --quiet --pinentry-mode loopback --passphrase-fd 3 \
   | gpg --batch --quiet --import
 
 gpg --batch --yes --local-user "$archive_fingerprint" --digest-algo SHA256 \
-  --clearsign --output "$output_dir/dists/stable/InRelease" "$release_file"
+  --clearsign --output "$output_dir/InRelease" "$output_dir/Release"
 gpg --batch --yes --armor --local-user "$archive_fingerprint" \
   --digest-algo SHA256 --detach-sign \
-  --output "$output_dir/dists/stable/Release.gpg" "$release_file"
+  --output "$output_dir/Release.gpg" "$output_dir/Release"
 
 gpgv --keyring "$repository_root/keys/openresearchtools-archive-keyring.gpg" \
-  "$output_dir/dists/stable/InRelease" >/dev/null
+  "$output_dir/InRelease" >/dev/null
 
-printf 'Built and signed APT repository at %s\n' "$output_dir"
+printf 'Built and signed external-asset APT repository at %s\n' "$output_dir"

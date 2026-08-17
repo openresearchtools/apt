@@ -1,22 +1,22 @@
-name: Publish APT repository
+name: Publish APT repository metadata
 
 on:
   workflow_dispatch:
   repository_dispatch:
     types: [package-released]
   schedule:
-    - cron: '17 4 * * 1'
+    - cron: '17 * * * *'
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
-  group: github-pages
+  group: apt-repository-release
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: Build and sign repository
+  publish:
+    name: Build, sign, and upload repository metadata
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: apt-signing
@@ -28,32 +28,69 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
-            apt-utils ca-certificates curl dpkg-dev gnupg jq
+            apt-utils ca-certificates dpkg-dev gnupg jq
 
-      - name: Build and sign repository
+      - name: Build and sign repository indexes
         env:
           GH_TOKEN: ${{ github.token }}
           APT_GPG_SIGNING_SUBKEY_B64: ${{ secrets.APT_GPG_SIGNING_SUBKEY_B64 }}
           APT_KEY_PASSWORD: ${{ secrets.APT_KEY_PASSWORD }}
         run: ./scripts/build-repository.sh
 
-      - name: Upload GitHub Pages artifact
-        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
-        with:
-          path: _site
+      - name: Create repository release when absent
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view repo >/dev/null 2>&1; then
+            gh release create repo \
+              --title 'Open Research Tools APT repository' \
+              --notes 'Machine-generated signed APT repository assets.' \
+              --latest=false
+          fi
 
-  deploy:
-    name: Deploy GitHub Pages
-    needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5
+      - name: Remove obsolete release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mapfile -t expected_assets < <(
+            find _repo -maxdepth 1 -type f -printf '%f\n' | sort
+          )
+          while IFS= read -r published_asset; do
+            if ! printf '%s\n' "${expected_assets[@]}" \
+              | grep --fixed-strings --line-regexp --quiet "$published_asset"; then
+              gh release delete-asset repo "$published_asset" --yes
+            fi
+          done < <(
+            gh release view repo --json assets --jq '.assets[].name'
+          )
+
+      - name: Upload keyring and public-key assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mapfile -d '' assets < <(
+            find _repo -maxdepth 1 -type f \
+              ! -name 'Packages' \
+              ! -name 'Packages.gz' \
+              ! -name 'Sources' \
+              ! -name 'Sources.gz' \
+              ! -name 'Release' \
+              ! -name 'Release.gpg' \
+              ! -name 'InRelease' \
+              -print0
+          )
+          gh release upload repo "${assets[@]}" --clobber
+
+      - name: Upload indexes and signatures last
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload repo \
+            _repo/Packages \
+            _repo/Packages.gz \
+            _repo/Sources \
+            _repo/Sources.gz \
+            _repo/Release \
+            _repo/Release.gpg \
+            _repo/InRelease \
+            --clobber

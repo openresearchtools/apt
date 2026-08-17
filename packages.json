@@ -1,6 +1,10 @@
 [
   {
     "repository": "openresearchtools/gnozzard",
-    "asset_glob": "*.deb"
+    "binary_asset_glob": "*.deb",
+    "source_asset_globs": [
+      "*.dsc",
+      "*.tar.*"
+    ]
   }
 ]

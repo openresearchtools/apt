@@ -5,4 +5,4 @@
 *-ci-signing-subkey.gpg
 
 # Generated repository output.
-_site/
+_repo/
