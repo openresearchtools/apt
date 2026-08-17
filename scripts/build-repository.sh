@@ -202,6 +202,8 @@ temporary_release="$work_dir/Release"
   apt-ftparchive \
     -o APT::FTPArchive::Release::Origin='Open Research Tools' \
     -o APT::FTPArchive::Release::Label='Open Research Tools' \
+    -o "APT::FTPArchive::Release::Suite=$metadata_suite" \
+    -o "APT::FTPArchive::Release::Codename=$metadata_suite" \
     -o APT::FTPArchive::Release::Architectures='amd64 arm64' \
     -o APT::FTPArchive::Release::Description='Open Research Tools packages' \
     release . > "$temporary_release"
