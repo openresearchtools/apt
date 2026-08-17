@@ -52,13 +52,25 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          retry() {
+            local attempt
+            for attempt in 1 2 3 4 5 6; do
+              if "$@"; then
+                return 0
+              fi
+              if [[ "$attempt" -eq 6 ]]; then
+                return 1
+              fi
+              sleep "$((attempt * 5))"
+            done
+          }
           mapfile -t expected_assets < <(
             find _repo -maxdepth 1 -type f -printf '%f\n' | sort
           )
           while IFS= read -r published_asset; do
             if ! printf '%s\n' "${expected_assets[@]}" \
               | grep --fixed-strings --line-regexp --quiet "$published_asset"; then
-              gh release delete-asset repo "$published_asset" --yes
+              retry gh release delete-asset repo "$published_asset" --yes
             fi
           done < <(
             gh release view repo --json assets --jq '.assets[].name'
@@ -68,6 +80,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          retry() {
+            local attempt
+            for attempt in 1 2 3 4 5 6; do
+              if "$@"; then
+                return 0
+              fi
+              if [[ "$attempt" -eq 6 ]]; then
+                return 1
+              fi
+              sleep "$((attempt * 5))"
+            done
+          }
+          published_assets="$(
+            gh api "repos/$GITHUB_REPOSITORY/releases/tags/repo" --jq '.assets'
+          )"
           mapfile -d '' assets < <(
             find _repo -maxdepth 1 -type f \
               ! -name 'Packages' \
@@ -77,13 +104,38 @@ jobs:
               ! -name 'InRelease' \
               -print0
           )
-          gh release upload repo "${assets[@]}" --clobber
+          for asset in "${assets[@]}"; do
+            asset_name="$(basename "$asset")"
+            local_digest="sha256:$(sha256sum "$asset" | cut -d ' ' -f 1)"
+            published_digest="$(
+              jq -r --arg name "$asset_name" \
+                '.[] | select(.name == $name) | .digest // empty' \
+                <<<"$published_assets"
+            )"
+            if [[ "$local_digest" == "$published_digest" ]]; then
+              printf 'Release asset is unchanged: %s\n' "$asset_name"
+              continue
+            fi
+            retry gh release upload repo "$asset" --clobber
+          done
 
       - name: Upload indexes and signatures last
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload repo \
+          retry() {
+            local attempt
+            for attempt in 1 2 3 4 5 6; do
+              if "$@"; then
+                return 0
+              fi
+              if [[ "$attempt" -eq 6 ]]; then
+                return 1
+              fi
+              sleep "$((attempt * 5))"
+            done
+          }
+          retry gh release upload repo \
             _repo/Packages \
             _repo/Packages.gz \
             _repo/Release \

@@ -11,6 +11,7 @@ archive_url="${APT_REPOSITORY_URL:-https://apt.openresearchtools.com}"
 metadata_suite="${APT_METADATA_SUITE:-apt/releases/download/repo/}"
 github_organization="${GITHUB_ORGANIZATION:-openresearchtools}"
 keyring_version="${KEYRING_VERSION:-2026.08.17}"
+keyring_source_date_epoch="${KEYRING_SOURCE_DATE_EPOCH:-1786924800}"
 archive_fingerprint="$(tr -d '[:space:]' < "$repository_root/keys/fingerprint.txt")"
 
 cleanup() {
@@ -42,6 +43,12 @@ esac
 if [[ "$metadata_suite" == /* || "$metadata_suite" != */ ]]; then
   printf 'APT_METADATA_SUITE must be a relative path ending in /: %s\n' \
     "$metadata_suite" >&2
+  exit 1
+fi
+
+if [[ ! "$keyring_source_date_epoch" =~ ^[0-9]+$ ]]; then
+  printf 'KEYRING_SOURCE_DATE_EPOCH must be a non-negative integer: %s\n' \
+    "$keyring_source_date_epoch" >&2
   exit 1
 fi
 
@@ -244,7 +251,8 @@ EOF
 
 keyring_filename="openresearchtools-archive-keyring_${keyring_version}_all.deb"
 keyring_deb="$keyring_packages/$keyring_filename"
-dpkg-deb --root-owner-group --build "$keyring_root" "$keyring_deb" >/dev/null
+SOURCE_DATE_EPOCH="$keyring_source_date_epoch" \
+  dpkg-deb --root-owner-group --build "$keyring_root" "$keyring_deb" >/dev/null
 append_binary_records "$keyring_packages" "apt/releases/download/repo"
 install -m 0644 "$keyring_deb" "$output_dir/$keyring_filename"
 install -m 0644 "$keyring_deb" "$output_dir/openresearchtools-archive-keyring.deb"
