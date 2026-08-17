@@ -19,11 +19,27 @@ curl -fsSLo /tmp/openresearchtools-archive-keyring.deb \
 sudo apt install /tmp/openresearchtools-archive-keyring.deb
 sudo apt update
 sudo apt install gnozzard
+sudo apt install pdf-markdown-studio
+sudo apt install transcribe-offline
 ```
 
 The keyring package has `Architecture: all`, so the same file works on AMD64
-and ARM64 systems. Gnozzard currently publishes the architectures listed in
-its latest GitHub release.
+and ARM64 systems. Individual applications and engine backends are available
+only for the architectures published in their latest GitHub releases.
+
+PDF Markdown Studio and Transcribe Offline both depend on the co-installable
+Vulkan and CUDA engine packages. APT installs these automatically:
+
+```text
+openresearchtools-engine
+openresearchtools-engine-cuda
+```
+
+To install only the engine runtimes:
+
+```bash
+sudo apt install openresearchtools-engine openresearchtools-engine-cuda
+```
 
 ### Manual key and source setup
 
@@ -43,6 +59,8 @@ Signed-By: /etc/apt/keyrings/openresearchtools-archive-keyring.gpg
 EOF
 sudo apt update
 sudo apt install gnozzard
+sudo apt install pdf-markdown-studio
+sudo apt install transcribe-offline
 ```
 
 ## How routing works
@@ -86,9 +104,11 @@ every configured repository and rebuilds the central catalogue. Debian version
 comparison determines which upgrade APT offers.
 
 The workflow can be triggered after an application publishes a release and
-also refreshes hourly. It downloads assets only into the temporary Actions
-workspace to calculate and validate metadata; application packages are not
-uploaded to the central release, committed to Git, or served by GitHub Pages.
+also refreshes hourly. It reads only the small control section at the start of
+each remote `.deb` and uses GitHub's recorded asset size and SHA-256 digest, so
+large engine packages are not downloaded during every catalogue refresh.
+Application packages are not uploaded to the central release, committed to
+Git, or served by GitHub Pages.
 
 ## Archive signing key
 

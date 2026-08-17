@@ -2,5 +2,17 @@
   {
     "repository": "openresearchtools/gnozzard",
     "binary_asset_glob": "*.deb"
+  },
+  {
+    "repository": "openresearchtools/engine",
+    "binary_asset_glob": "engine-amd64*.deb"
+  },
+  {
+    "repository": "openresearchtools/PDF-Markdown-Studio",
+    "binary_asset_glob": "pdf-markdown-studio-ubuntu-amd64.deb"
+  },
+  {
+    "repository": "openresearchtools/transcribeoffline",
+    "binary_asset_glob": "transcribe-offline_*_amd64.deb"
   }
 ]

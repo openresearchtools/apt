@@ -26,8 +26,8 @@ require_command() {
 }
 
 for command_name in \
-  apt-ftparchive base64 dpkg-deb dpkg-scanpackages \
-  gh gpg gpgv gzip jq md5sum sha1sum sha256sum; do
+  apt-ftparchive base64 curl dpkg dpkg-deb dpkg-scanpackages \
+  gh gpg gpgv gzip jq; do
   require_command "$command_name"
 done
 
@@ -96,6 +96,90 @@ append_binary_records() {
     }
     { print }
   ' "$records_file" >> "$output_dir/Packages"
+}
+
+append_remote_binary_record() {
+  local asset_name="$1"
+  local asset_url="$2"
+  local asset_size="$3"
+  local asset_digest="$4"
+  local archive_prefix="$5"
+  local control_deb control_file package_name package_version
+  local package_architecture identity range_bytes asset_sha256
+
+  if [[ ! "$asset_name" =~ ^[A-Za-z0-9][A-Za-z0-9._+~-]*\.deb$ ]]; then
+    printf 'Unsupported Debian asset filename: %s\n' "$asset_name" >&2
+    exit 1
+  fi
+  if [[ ! "$asset_url" =~ ^https://github\.com/ ]]; then
+    printf 'Unexpected Debian asset URL: %s\n' "$asset_url" >&2
+    exit 1
+  fi
+  if [[ ! "$asset_size" =~ ^[1-9][0-9]*$ ]]; then
+    printf 'Invalid asset size for %s: %s\n' "$asset_name" "$asset_size" >&2
+    exit 1
+  fi
+  if [[ ! "$asset_digest" =~ ^sha256:([0-9a-f]{64})$ ]]; then
+    printf 'GitHub did not provide a SHA-256 digest for %s\n' "$asset_name" >&2
+    exit 1
+  fi
+  asset_sha256="${BASH_REMATCH[1]}"
+
+  control_deb="$(mktemp --suffix=.deb "$work_dir/control.XXXXXX")"
+  control_file="$(mktemp "$work_dir/control-fields.XXXXXX")"
+  for range_bytes in 1048576 4194304 16777216; do
+    curl --fail --silent --show-error --location \
+      --retry 3 --retry-all-errors \
+      --range "0-$((range_bytes - 1))" \
+      --max-filesize "$range_bytes" \
+      "$asset_url" --output "$control_deb"
+    if dpkg-deb --field "$control_deb" > "$control_file" 2>/dev/null; then
+      break
+    fi
+    : > "$control_file"
+  done
+  if [[ ! -s "$control_file" ]]; then
+    printf 'Could not read Debian control metadata from %s\n' "$asset_url" >&2
+    exit 1
+  fi
+
+  package_name="$(dpkg-deb --field "$control_deb" Package)"
+  package_version="$(dpkg-deb --field "$control_deb" Version)"
+  package_architecture="$(dpkg-deb --field "$control_deb" Architecture)"
+  if [[ ! "$package_name" =~ ^[a-z0-9][a-z0-9+.-]+$ ]]; then
+    printf 'Invalid package name in %s: %s\n' "$asset_name" "$package_name" >&2
+    exit 1
+  fi
+  if ! dpkg --validate-version "$package_version"; then
+    printf 'Invalid package version in %s: %s\n' "$asset_name" "$package_version" >&2
+    exit 1
+  fi
+  if [[ ! "$package_architecture" =~ ^(all|amd64|arm64)$ ]]; then
+    printf 'Unsupported package architecture in %s: %s\n' \
+      "$asset_name" "$package_architecture" >&2
+    exit 1
+  fi
+  if awk -F: '
+    $1 == "Filename" || $1 == "Size" || $1 == "MD5sum" ||
+    $1 == "SHA1" || $1 == "SHA256" { found = 1 }
+    END { exit found ? 0 : 1 }
+  ' "$control_file"; then
+    printf 'Reserved repository fields found in %s control metadata\n' \
+      "$asset_name" >&2
+    exit 1
+  fi
+
+  identity="$package_name|$package_version|$package_architecture"
+  if [[ -n "${indexed_binary_versions[$identity]:-}" ]]; then
+    printf 'Duplicate package/version/architecture: %s\n' "$identity" >&2
+    exit 1
+  fi
+  indexed_binary_versions[$identity]="$asset_url"
+
+  cat "$control_file" >> "$output_dir/Packages"
+  printf 'Filename: %s/%s\nSize: %s\nSHA256: %s\n\n' \
+    "$archive_prefix" "$asset_name" "$asset_size" "$asset_sha256" \
+    >> "$output_dir/Packages"
 }
 
 keyring_root="$work_dir/keyring-root"
@@ -169,7 +253,6 @@ while IFS= read -r package_spec; do
   package_repository="$(jq -r '.repository' <<<"$package_spec")"
   binary_asset_glob="$(jq -r '.binary_asset_glob // .asset_glob // empty' \
     <<<"$package_spec")"
-  download_dir="$(mktemp -d "$work_dir/download.XXXXXX")"
 
   if [[ ! "$package_repository" =~ ^$github_organization/[A-Za-z0-9_.-]+$ ]]; then
     printf 'Invalid configured GitHub repository: %s\n' "$package_repository" >&2
@@ -181,7 +264,8 @@ while IFS= read -r package_spec; do
   fi
 
   repository_name="${package_repository#*/}"
-  release_tag="$(gh api "repos/$package_repository/releases/latest" --jq '.tag_name')"
+  release_json="$(gh api "repos/$package_repository/releases/latest")"
+  release_tag="$(jq -r '.tag_name' <<<"$release_json")"
   if [[ ! "$release_tag" =~ ^[A-Za-z0-9._+~-]+$ ]]; then
     printf 'Release tag contains unsupported URL characters: %s\n' "$release_tag" >&2
     exit 1
@@ -189,9 +273,25 @@ while IFS= read -r package_spec; do
   archive_prefix="$repository_name/releases/download/$release_tag"
 
   printf 'Indexing %s release %s\n' "$package_repository" "$release_tag"
-  gh release download "$release_tag" --repo "$package_repository" \
-    --pattern "$binary_asset_glob" --dir "$download_dir"
-  append_binary_records "$download_dir" "$archive_prefix"
+  matched_assets=0
+  while IFS= read -r asset_spec; do
+    asset_name="$(jq -r '.name' <<<"$asset_spec")"
+    if [[ "$asset_name" != $binary_asset_glob ]]; then
+      continue
+    fi
+    append_remote_binary_record \
+      "$asset_name" \
+      "$(jq -r '.browser_download_url' <<<"$asset_spec")" \
+      "$(jq -r '.size' <<<"$asset_spec")" \
+      "$(jq -r '.digest // empty' <<<"$asset_spec")" \
+      "$archive_prefix"
+    matched_assets=$((matched_assets + 1))
+  done < <(jq -c '.assets[]' <<<"$release_json")
+  if [[ "$matched_assets" -eq 0 ]]; then
+    printf 'No release assets matched %s in %s release %s\n' \
+      "$binary_asset_glob" "$package_repository" "$release_tag" >&2
+    exit 1
+  fi
 done < <(jq -c '.[]' "$repository_root/packages.json")
 
 gzip -n -9 -c "$output_dir/Packages" > "$output_dir/Packages.gz"
