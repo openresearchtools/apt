@@ -72,8 +72,6 @@ jobs:
             find _repo -maxdepth 1 -type f \
               ! -name 'Packages' \
               ! -name 'Packages.gz' \
-              ! -name 'Sources' \
-              ! -name 'Sources.gz' \
               ! -name 'Release' \
               ! -name 'Release.gpg' \
               ! -name 'InRelease' \
@@ -88,8 +86,6 @@ jobs:
           gh release upload repo \
             _repo/Packages \
             _repo/Packages.gz \
-            _repo/Sources \
-            _repo/Sources.gz \
             _repo/Release \
             _repo/Release.gpg \
             _repo/InRelease \

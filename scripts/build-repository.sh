@@ -26,7 +26,7 @@ require_command() {
 }
 
 for command_name in \
-  apt-ftparchive base64 dpkg-deb dpkg-scanpackages dpkg-scansources \
+  apt-ftparchive base64 dpkg-deb dpkg-scanpackages \
   gh gpg gpgv gzip jq md5sum sha1sum sha256sum; do
   require_command "$command_name"
 done
@@ -48,7 +48,6 @@ fi
 find "$output_dir" -mindepth 1 -depth -delete 2>/dev/null || true
 mkdir -p "$output_dir"
 : > "$output_dir/Packages"
-: > "$output_dir/Sources"
 
 declare -A indexed_binary_versions=()
 
@@ -99,30 +98,6 @@ append_binary_records() {
   ' "$records_file" >> "$output_dir/Packages"
 }
 
-append_source_records() {
-  local source_dir="$1"
-  local archive_prefix="$2"
-  local records_file="$work_dir/source-records.$RANDOM"
-
-  (
-    cd "$source_dir"
-    dpkg-scansources . /dev/null
-  ) > "$records_file"
-
-  if [[ ! -s "$records_file" ]]; then
-    printf 'No Debian source packages found in %s\n' "$source_dir" >&2
-    exit 1
-  fi
-
-  awk -v prefix="$archive_prefix" '
-    /^Directory:/ {
-      print "Directory: " prefix
-      next
-    }
-    { print }
-  ' "$records_file" >> "$output_dir/Sources"
-}
-
 keyring_root="$work_dir/keyring-root"
 keyring_packages="$work_dir/keyring-packages"
 mkdir -p \
@@ -137,7 +112,7 @@ install -m 0644 \
   "$keyring_root/usr/share/keyrings/openresearchtools-archive-keyring.gpg"
 
 cat > "$keyring_root/etc/apt/sources.list.d/openresearchtools.sources" <<EOF
-Types: deb deb-src
+Types: deb
 URIs: $archive_url
 Suites: $metadata_suite
 Signed-By: /usr/share/keyrings/openresearchtools-archive-keyring.gpg
@@ -217,21 +192,9 @@ while IFS= read -r package_spec; do
   gh release download "$release_tag" --repo "$package_repository" \
     --pattern "$binary_asset_glob" --dir "$download_dir"
   append_binary_records "$download_dir" "$archive_prefix"
-
-  source_patterns="$(jq -r '.source_asset_globs[]? // empty' <<<"$package_spec")"
-  if [[ -z "$source_patterns" ]]; then
-    printf 'No source_asset_globs configured for %s\n' "$package_repository" >&2
-    exit 1
-  fi
-  while IFS= read -r source_pattern; do
-    gh release download "$release_tag" --repo "$package_repository" \
-      --pattern "$source_pattern" --dir "$download_dir"
-  done <<< "$source_patterns"
-  append_source_records "$download_dir" "$archive_prefix"
 done < <(jq -c '.[]' "$repository_root/packages.json")
 
 gzip -n -9 -c "$output_dir/Packages" > "$output_dir/Packages.gz"
-gzip -n -9 -c "$output_dir/Sources" > "$output_dir/Sources.gz"
 
 temporary_release="$work_dir/Release"
 (

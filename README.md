@@ -1,10 +1,10 @@
 # Open Research Tools APT repository
 
 This repository publishes the signed package catalogue for Open Research
-Tools at `https://apt.openresearchtools.com`. Application binaries and Debian
-source packages remain in each application's own GitHub Releases; the central
-`openresearchtools/apt` release contains only signed indexes, public-key files,
-and the small archive-keyring package.
+Tools at `https://apt.openresearchtools.com`. Application binaries remain in
+each application's own GitHub Releases; the central `openresearchtools/apt`
+release contains only signed indexes, public-key files, and the small
+archive-keyring package.
 
 ## Installation
 
@@ -36,19 +36,13 @@ curl -fsSL \
   | sudo tee /etc/apt/keyrings/openresearchtools-archive-keyring.gpg >/dev/null
 sudo chmod 0644 /etc/apt/keyrings/openresearchtools-archive-keyring.gpg
 sudo tee /etc/apt/sources.list.d/openresearchtools.sources >/dev/null <<'EOF'
-Types: deb deb-src
+Types: deb
 URIs: https://apt.openresearchtools.com
 Suites: apt/releases/download/repo/
 Signed-By: /etc/apt/keyrings/openresearchtools-archive-keyring.gpg
 EOF
 sudo apt update
 sudo apt install gnozzard
-```
-
-To download a package's indexed Debian source package:
-
-```bash
-apt source gnozzard
 ```
 
 ## How routing works
@@ -75,17 +69,21 @@ apt.openresearchtools.com/gnozzard/releases/download/v0.1.5/gnozzard_amd64.deb
 → github.com/openresearchtools/gnozzard/releases/download/v0.1.5/gnozzard_amd64.deb
 ```
 
-`Sources` uses the same arrangement for `.dsc` and source-tarball assets. APT
-verifies the central signed indexes and then verifies each downloaded file
-against the size and cryptographic hashes recorded in those indexes.
+APT verifies the central signed index and then verifies each downloaded file
+against the size and cryptographic hashes recorded in that index.
+
+The binary package metadata points users to the application's public GitHub
+repository. GitHub automatically provides ZIP and tar.gz archives of the exact
+repository tag on every release page; no separate `deb-src` repository or
+manually uploaded source archive is used.
 
 ## Independent package releases
 
 Package sources are declared in `packages.json`. Each configured repository
-keeps its own version numbers, release schedule, architectures, binary assets,
-and Debian source-package assets. The publishing workflow reads the latest
-non-prerelease release of every configured repository and rebuilds the central
-catalogue. Debian version comparison determines which upgrade APT offers.
+keeps its own version numbers, release schedule, architectures, and binary
+assets. The publishing workflow reads the latest non-prerelease release of
+every configured repository and rebuilds the central catalogue. Debian version
+comparison determines which upgrade APT offers.
 
 The workflow can be triggered after an application publishes a release and
 also refreshes hourly. It downloads assets only into the temporary Actions
@@ -114,12 +112,8 @@ this repository.
 
 ## Adding a package
 
-Every application release selected for indexing must contain:
-
-- one or more `.deb` files;
-- a Debian `.dsc` file; and
-- every source archive referenced by the `.dsc` file, such as a native
-  `.tar.xz`, `.orig.tar.xz`, and `.debian.tar.xz`.
+Every application release selected for indexing must contain one or more `.deb`
+files. Its release tag must identify the source used to build those packages.
 
 Add its repository and asset patterns to `packages.json`, then run the
 `Publish APT repository metadata` workflow. All repositories can use the same
