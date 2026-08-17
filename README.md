@@ -21,11 +21,12 @@ sudo apt update
 sudo apt install gnozzard
 sudo apt install pdf-markdown-studio
 sudo apt install transcribe-offline
+sudo apt install llama-cpp
 ```
 
 The keyring package has `Architecture: all`, so the same file works on AMD64
 and ARM64 systems. Individual applications and engine backends are available
-only for the architectures published in their latest GitHub releases.
+only for the architectures present in their published GitHub releases.
 
 PDF Markdown Studio and Transcribe Offline both depend on the co-installable
 Vulkan and CUDA engine packages. APT installs these automatically:
@@ -39,6 +40,19 @@ To install only the engine runtimes:
 
 ```bash
 sudo apt install openresearchtools-engine openresearchtools-engine-cuda
+```
+
+The llama.cpp repository publishes mutually exclusive standard and CUDA
+packages for AMD64 and ARM64. Install one of them, not both. The CUDA variant
+also requires NVIDIA's CUDA runtime packages to be available from a configured
+package source:
+
+```bash
+# Standard Vulkan build
+sudo apt install llama-cpp
+
+# Or the CUDA build
+sudo apt install llama-cpp-cuda
 ```
 
 ### Manual key and source setup
@@ -61,6 +75,7 @@ sudo apt update
 sudo apt install gnozzard
 sudo apt install pdf-markdown-studio
 sudo apt install transcribe-offline
+sudo apt install llama-cpp
 ```
 
 ## How routing works
@@ -83,8 +98,8 @@ Each `Packages` entry contains an organization-relative GitHub Release path,
 so package traffic goes directly to that application's own release:
 
 ```text
-apt.openresearchtools.com/gnozzard/releases/download/v0.1.5/gnozzard_amd64.deb
-→ github.com/openresearchtools/gnozzard/releases/download/v0.1.5/gnozzard_amd64.deb
+apt.openresearchtools.com/gnozzard/releases/download/v0.1.6/gnozzard_amd64.deb
+→ github.com/openresearchtools/gnozzard/releases/download/v0.1.6/gnozzard_amd64.deb
 ```
 
 APT verifies the central signed index and then verifies each downloaded file
@@ -99,9 +114,21 @@ manually uploaded source archive is used.
 
 Package sources are declared in `packages.json`. Each configured repository
 keeps its own version numbers, release schedule, architectures, and binary
-assets. The publishing workflow reads the latest non-prerelease release of
-every configured repository and rebuilds the central catalogue. Debian version
-comparison determines which upgrade APT offers.
+assets. The publishing workflow reads every non-draft GitHub release and
+indexes each matching `.deb`; releases without a matching package are skipped.
+This includes published prereleases. Debian version comparison determines which
+version APT selects as the default upgrade candidate.
+
+List every indexed version or install one explicitly:
+
+```bash
+apt list -a gnozzard
+sudo apt install gnozzard=0.1.5
+```
+
+APT can install an older version only while that GitHub release and its `.deb`
+asset still exist. Downgrading an already-installed newer package may require
+`--allow-downgrades`.
 
 The workflow can be triggered after an application publishes a release and
 also refreshes hourly. It reads only the small control section at the start of

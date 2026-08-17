@@ -264,32 +264,44 @@ while IFS= read -r package_spec; do
   fi
 
   repository_name="${package_repository#*/}"
-  release_json="$(gh api "repos/$package_repository/releases/latest")"
-  release_tag="$(jq -r '.tag_name' <<<"$release_json")"
-  if [[ ! "$release_tag" =~ ^[A-Za-z0-9._+~-]+$ ]]; then
-    printf 'Release tag contains unsupported URL characters: %s\n' "$release_tag" >&2
-    exit 1
-  fi
-  archive_prefix="$repository_name/releases/download/$release_tag"
+  matched_repository_assets=0
+  while IFS= read -r encoded_release; do
+    release_json="$(base64 --decode <<<"$encoded_release")"
+    release_tag="$(jq -r '.tag_name' <<<"$release_json")"
+    matched_release_assets=0
 
-  printf 'Indexing %s release %s\n' "$package_repository" "$release_tag"
-  matched_assets=0
-  while IFS= read -r asset_spec; do
-    asset_name="$(jq -r '.name' <<<"$asset_spec")"
-    if [[ "$asset_name" != $binary_asset_glob ]]; then
-      continue
-    fi
-    append_remote_binary_record \
-      "$asset_name" \
-      "$(jq -r '.browser_download_url' <<<"$asset_spec")" \
-      "$(jq -r '.size' <<<"$asset_spec")" \
-      "$(jq -r '.digest // empty' <<<"$asset_spec")" \
-      "$archive_prefix"
-    matched_assets=$((matched_assets + 1))
-  done < <(jq -c '.assets[]' <<<"$release_json")
-  if [[ "$matched_assets" -eq 0 ]]; then
-    printf 'No release assets matched %s in %s release %s\n' \
-      "$binary_asset_glob" "$package_repository" "$release_tag" >&2
+    while IFS= read -r asset_spec; do
+      asset_name="$(jq -r '.name' <<<"$asset_spec")"
+      if [[ "$asset_name" != $binary_asset_glob ]]; then
+        continue
+      fi
+
+      if [[ "$matched_release_assets" -eq 0 ]]; then
+        if [[ ! "$release_tag" =~ ^[A-Za-z0-9._+~-]+$ ]]; then
+          printf 'Release tag contains unsupported URL characters: %s\n' \
+            "$release_tag" >&2
+          exit 1
+        fi
+        archive_prefix="$repository_name/releases/download/$release_tag"
+        printf 'Indexing %s release %s\n' "$package_repository" "$release_tag"
+      fi
+
+      append_remote_binary_record \
+        "$asset_name" \
+        "$(jq -r '.browser_download_url' <<<"$asset_spec")" \
+        "$(jq -r '.size' <<<"$asset_spec")" \
+        "$(jq -r '.digest // empty' <<<"$asset_spec")" \
+        "$archive_prefix"
+      matched_release_assets=$((matched_release_assets + 1))
+      matched_repository_assets=$((matched_repository_assets + 1))
+    done < <(jq -c '.assets[]' <<<"$release_json")
+  done < <(
+    gh api --paginate "repos/$package_repository/releases?per_page=100" \
+      --jq '.[] | select(.draft == false) | @base64'
+  )
+  if [[ "$matched_repository_assets" -eq 0 ]]; then
+    printf 'No published release assets matched %s in %s\n' \
+      "$binary_asset_glob" "$package_repository" >&2
     exit 1
   fi
 done < <(jq -c '.[]' "$repository_root/packages.json")

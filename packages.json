@@ -14,5 +14,9 @@
   {
     "repository": "openresearchtools/transcribeoffline",
     "binary_asset_glob": "transcribe-offline_*_amd64.deb"
+  },
+  {
+    "repository": "openresearchtools/llama-deb",
+    "binary_asset_glob": "*.deb"
   }
 ]
