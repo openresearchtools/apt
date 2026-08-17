@@ -305,7 +305,7 @@ while IFS= read -r package_spec; do
     done < <(jq -c '.assets[]' <<<"$release_json")
   done < <(
     gh api --paginate "repos/$package_repository/releases?per_page=100" \
-      --jq '.[] | select(.draft == false) | @base64'
+      --jq '.[] | select(.draft == false and .prerelease == false) | @base64'
   )
   if [[ "$matched_repository_assets" -eq 0 ]]; then
     printf 'No published release assets matched %s in %s\n' \

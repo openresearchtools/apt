@@ -113,10 +113,11 @@ manually uploaded source archive is used.
 
 Package sources are declared in `packages.json`. Each configured repository
 keeps its own version numbers, release schedule, architectures, and binary
-assets. The publishing workflow reads every non-draft GitHub release and
-indexes each matching `.deb`; releases without a matching package are skipped.
-This includes published prereleases. Debian version comparison determines which
-version APT selects as the default upgrade candidate.
+assets. The publishing workflow reads only proper GitHub Releases: drafts and
+prereleases are excluded. From those releases it indexes only attached `.deb`
+assets matching the configured filename pattern. GitHub Actions artifacts and
+unrelated release assets are never indexed. Debian version comparison determines
+which stable version APT selects as the default upgrade candidate.
 
 List every indexed version or install one explicitly:
 
