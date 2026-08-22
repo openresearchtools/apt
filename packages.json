@@ -18,5 +18,9 @@
   {
     "repository": "openresearchtools/llama-deb",
     "binary_asset_glob": "*.deb"
+  },
+  {
+    "repository": "openresearchtools/simplehf",
+    "binary_asset_glob": "simplehf_*_amd64.deb"
   }
 ]

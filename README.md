@@ -21,6 +21,7 @@ sudo apt install gnozzard
 sudo apt install pdf-markdown-studio
 sudo apt install transcribe-offline
 sudo apt install llama-cpp
+sudo apt install simplehf
 ```
 
 The keyring package has `Architecture: all`, so the same file works on AMD64
@@ -75,6 +76,7 @@ sudo apt install gnozzard
 sudo apt install pdf-markdown-studio
 sudo apt install transcribe-offline
 sudo apt install llama-cpp
+sudo apt install simplehf
 ```
 
 ## How routing works
