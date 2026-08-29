@@ -22,11 +22,22 @@ sudo apt install pdf-markdown-studio
 sudo apt install transcribe-offline
 sudo apt install llama-cpp
 sudo apt install simplehf
+sudo apt install buzzardos
 ```
 
 The keyring package has `Architecture: all`, so the same file works on AMD64
 and ARM64 systems. Individual applications and engine backends are available
 only for the architectures present in their published GitHub releases.
+
+Buzzard OS publishes four independently versioned packages. Install the host
+manager on the host; its signed reference-machine recipes install the three
+guest packages from this same repository and leave them APT-updatable:
+
+```bash
+sudo apt install buzzardos
+# Installed inside a Buzzard reference machine by its Containerfile:
+sudo apt install buzzardos-guest buzzardos-desktop buzzardoscua
+```
 
 PDF Markdown Studio and Transcribe Offline both depend on the co-installable
 Vulkan and CUDA engine packages. APT installs these automatically:
@@ -77,6 +88,7 @@ sudo apt install pdf-markdown-studio
 sudo apt install transcribe-offline
 sudo apt install llama-cpp
 sudo apt install simplehf
+sudo apt install buzzardos
 ```
 
 ## How routing works
