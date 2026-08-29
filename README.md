@@ -23,6 +23,7 @@ sudo apt install transcribe-offline
 sudo apt install llama-cpp
 sudo apt install simplehf
 sudo apt install buzzardos
+sudo apt install lufus
 ```
 
 The keyring package has `Architecture: all`, so the same file works on AMD64
@@ -89,6 +90,7 @@ sudo apt install transcribe-offline
 sudo apt install llama-cpp
 sudo apt install simplehf
 sudo apt install buzzardos
+sudo apt install lufus
 ```
 
 ## How routing works

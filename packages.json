@@ -26,5 +26,9 @@
   {
     "repository": "openresearchtools/BuzzardOS",
     "binary_asset_glob": "*.deb"
+  },
+  {
+    "repository": "openresearchtools/lufus",
+    "binary_asset_glob": "lufus_*_amd64.deb"
   }
 ]
