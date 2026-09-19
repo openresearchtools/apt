@@ -5,15 +5,15 @@
   },
   {
     "repository": "openresearchtools/engine",
-    "binary_asset_glob": "engine-amd64*.deb"
+    "binary_asset_glob": "engine-*.deb"
   },
   {
     "repository": "openresearchtools/PDF-Markdown-Studio",
-    "binary_asset_glob": "pdf-markdown-studio-ubuntu-amd64.deb"
+    "binary_asset_glob": "pdf-markdown-studio-*.deb"
   },
   {
     "repository": "openresearchtools/transcribeoffline",
-    "binary_asset_glob": "transcribe-offline_*_amd64.deb"
+    "binary_asset_glob": "transcribe-offline_*.deb"
   },
   {
     "repository": "openresearchtools/llama-deb",
@@ -21,7 +21,7 @@
   },
   {
     "repository": "openresearchtools/simplehf",
-    "binary_asset_glob": "simplehf_*_amd64.deb"
+    "binary_asset_glob": "simplehf_*.deb"
   },
   {
     "repository": "openresearchtools/BuzzardOS",
@@ -29,6 +29,6 @@
   },
   {
     "repository": "openresearchtools/lufus",
-    "binary_asset_glob": "lufus_*_amd64.deb"
+    "binary_asset_glob": "lufus_*.deb"
   }
 ]

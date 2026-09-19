@@ -4,11 +4,11 @@ This repository publishes the signed package catalogue for Open Research
 Tools at `https://apt.openresearchtools.com`. Application binaries remain in
 each application's own GitHub Releases; the central `openresearchtools/apt`
 release contains only signed indexes, public-key files, and the small
-archive-keyring package.
+Debian and Termux keyring packages.
 
 ## Installation
 
-### Recommended: install the keyring package
+### Debian/Ubuntu: install the keyring package
 
 The architecture-independent keyring package installs both the public archive
 key and the APT source definition:
@@ -27,8 +27,10 @@ sudo apt install lufus
 ```
 
 The keyring package has `Architecture: all`, so the same file works on AMD64
-and ARM64 systems. Individual applications and engine backends are available
-only for the architectures present in their published GitHub releases.
+and ARM64 Debian/Ubuntu systems. Its filesystem paths are not suitable for
+native Termux; use the separate Termux setup below. Individual applications
+and engine backends are available only for the architectures present in their
+published GitHub releases.
 
 Buzzard OS publishes four independently versioned packages. Install the host
 manager on the host; its signed reference-machine recipes install the three
@@ -67,7 +69,36 @@ sudo apt install llama-cpp
 sudo apt install llama-cpp-cuda
 ```
 
-### Manual key and source setup
+### Native Termux: install the Termux keyring package
+
+On an ARM64 Android device running native Termux (not a Debian proot), run:
+
+```bash
+pkg install wget
+wget -O "$HOME/openresearchtools-termux-keyring.deb" \
+  https://github.com/openresearchtools/apt/releases/download/repo/openresearchtools-termux-keyring.deb
+apt install "$HOME/openresearchtools-termux-keyring.deb"
+apt update
+```
+
+No root or `sudo` is needed. This separately named `aarch64` package installs
+the same public archive key and the same flat repository URL under
+`/data/data/com.termux/files/usr`. It also works with custom-signed Termux
+builds that retain that package name and prefix.
+
+After setup, use `apt install PACKAGE` and `apt upgrade` normally. Only
+applications actually published as native Termux/Bionic builds are usable;
+adding the repository does not convert Debian binaries into Android binaries.
+The Termux keyring is the initial `aarch64` package; application builds are
+published independently by their respective projects.
+
+Both platforms share one signed `Packages` index. Debian uses `amd64` or
+`arm64`; ARM64 Termux uses `aarch64`. Both also consider `Architecture: all`
+packages, so `all` does not mean cross-platform compatibility. The differently
+named keyring packages do not replace each other during upgrades. Do not
+install the Debian keyring or other Debian-only `all` packages in Termux.
+
+### Debian/Ubuntu: manual key and source setup
 
 Do not combine this method with the keyring-package method above.
 
@@ -180,4 +211,10 @@ files. Its release tag must identify the source used to build those packages.
 
 Add its repository and asset patterns to `packages.json`, then run the
 `Publish APT repository metadata` workflow. All repositories can use the same
-archive key and user-installed keyring package.
+archive key, with the appropriate user-installed keyring package for each platform.
+
+The publisher accepts `all`, `amd64`, `arm64`, and `aarch64` package metadata.
+Use `aarch64` for native Termux builds in this catalogue and keep their paths
+and dependencies compatible with Termux. Asset patterns include architectures
+without requiring a separate catalogue or signing key. Debian-specific
+`Architecture: all` packages must not be dependencies of Termux packages.

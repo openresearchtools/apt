@@ -12,6 +12,9 @@ metadata_suite="${APT_METADATA_SUITE:-apt/releases/download/repo/}"
 github_organization="${GITHUB_ORGANIZATION:-openresearchtools}"
 keyring_version="${KEYRING_VERSION:-2026.08.17}"
 keyring_source_date_epoch="${KEYRING_SOURCE_DATE_EPOCH:-1786924800}"
+termux_keyring_version="${TERMUX_KEYRING_VERSION:-2026.09.19}"
+termux_keyring_source_date_epoch="${TERMUX_KEYRING_SOURCE_DATE_EPOCH:-1789776000}"
+termux_prefix="/data/data/com.termux/files/usr"
 archive_fingerprint="$(tr -d '[:space:]' < "$repository_root/keys/fingerprint.txt")"
 
 cleanup() {
@@ -46,9 +49,9 @@ if [[ "$metadata_suite" == /* || "$metadata_suite" != */ ]]; then
   exit 1
 fi
 
-if [[ ! "$keyring_source_date_epoch" =~ ^[0-9]+$ ]]; then
-  printf 'KEYRING_SOURCE_DATE_EPOCH must be a non-negative integer: %s\n' \
-    "$keyring_source_date_epoch" >&2
+if [[ ! "$keyring_source_date_epoch" =~ ^[0-9]+$ ||
+      ! "$termux_keyring_source_date_epoch" =~ ^[0-9]+$ ]]; then
+  printf 'Keyring SOURCE_DATE_EPOCH values must be non-negative integers\n' >&2
   exit 1
 fi
 
@@ -73,7 +76,7 @@ append_binary_records() {
       printf 'Invalid package name in %s: %s\n' "$package_file" "$package_name" >&2
       exit 1
     fi
-    if [[ ! "$package_architecture" =~ ^(all|amd64|arm64)$ ]]; then
+    if [[ ! "$package_architecture" =~ ^(all|amd64|arm64|aarch64)$ ]]; then
       printf 'Unsupported package architecture in %s: %s\n' \
         "$package_file" "$package_architecture" >&2
       exit 1
@@ -161,7 +164,7 @@ append_remote_binary_record() {
     printf 'Invalid package version in %s: %s\n' "$asset_name" "$package_version" >&2
     exit 1
   fi
-  if [[ ! "$package_architecture" =~ ^(all|amd64|arm64)$ ]]; then
+  if [[ ! "$package_architecture" =~ ^(all|amd64|arm64|aarch64)$ ]]; then
     printf 'Unsupported package architecture in %s: %s\n' \
       "$asset_name" "$package_architecture" >&2
     exit 1
@@ -253,9 +256,68 @@ keyring_filename="openresearchtools-archive-keyring_${keyring_version}_all.deb"
 keyring_deb="$keyring_packages/$keyring_filename"
 SOURCE_DATE_EPOCH="$keyring_source_date_epoch" \
   dpkg-deb --root-owner-group --build "$keyring_root" "$keyring_deb" >/dev/null
-append_binary_records "$keyring_packages" "apt/releases/download/repo"
 install -m 0644 "$keyring_deb" "$output_dir/$keyring_filename"
 install -m 0644 "$keyring_deb" "$output_dir/openresearchtools-archive-keyring.deb"
+
+# Termux uses the same archive key and flat catalogue, but its package payloads
+# must be rooted in the com.termux prefix rather than Debian's /etc and /usr.
+termux_keyring_name="openresearchtools-termux-keyring"
+termux_keyring_root="$work_dir/termux-keyring-root"
+termux_keyring_payload="$termux_keyring_root$termux_prefix"
+mkdir -p \
+  "$termux_keyring_root/DEBIAN" \
+  "$termux_keyring_payload/etc/apt/sources.list.d" \
+  "$termux_keyring_payload/share/keyrings" \
+  "$termux_keyring_payload/share/doc/$termux_keyring_name"
+
+install -m 0644 \
+  "$repository_root/keys/openresearchtools-archive-keyring.gpg" \
+  "$termux_keyring_payload/share/keyrings/openresearchtools-archive-keyring.gpg"
+
+cat > "$termux_keyring_payload/etc/apt/sources.list.d/openresearchtools.sources" <<EOF
+Types: deb
+URIs: $archive_url
+Suites: $metadata_suite
+Architectures: aarch64
+Signed-By: $termux_prefix/share/keyrings/openresearchtools-archive-keyring.gpg
+EOF
+
+cat > "$termux_keyring_root/DEBIAN/control" <<EOF
+Package: $termux_keyring_name
+Version: $termux_keyring_version
+Architecture: aarch64
+Maintainer: Open Research Tools <openresearchtools@users.noreply.github.com>
+Depends: ca-certificates
+Section: misc
+Priority: optional
+Homepage: https://github.com/openresearchtools/apt
+Description: Open Research Tools APT archive key and source for Termux
+ Installs the public archive key and flat repository source for native
+ Android/Bionic aarch64 packages under the com.termux prefix.
+EOF
+
+printf '%s\n' "$termux_prefix/etc/apt/sources.list.d/openresearchtools.sources" \
+  > "$termux_keyring_root/DEBIAN/conffiles"
+cat > "$work_dir/termux-changelog" <<EOF
+$termux_keyring_name ($termux_keyring_version) stable; urgency=medium
+
+  * Add native Termux aarch64 setup using the existing public archive key.
+
+ -- Open Research Tools <openresearchtools@users.noreply.github.com>  Sat, 19 Sep 2026 00:00:00 +0000
+EOF
+gzip -n -9 < "$work_dir/termux-changelog" \
+  > "$termux_keyring_payload/share/doc/$termux_keyring_name/changelog.gz"
+sed "s/Upstream-Name: openresearchtools-archive-keyring/Upstream-Name: $termux_keyring_name/" \
+  "$keyring_root/usr/share/doc/openresearchtools-archive-keyring/copyright" \
+  > "$termux_keyring_payload/share/doc/$termux_keyring_name/copyright"
+
+termux_keyring_filename="${termux_keyring_name}_${termux_keyring_version}_aarch64.deb"
+termux_keyring_deb="$keyring_packages/$termux_keyring_filename"
+SOURCE_DATE_EPOCH="$termux_keyring_source_date_epoch" \
+  dpkg-deb --root-owner-group --build "$termux_keyring_root" "$termux_keyring_deb" >/dev/null
+install -m 0644 "$termux_keyring_deb" "$output_dir/$termux_keyring_filename"
+install -m 0644 "$termux_keyring_deb" "$output_dir/$termux_keyring_name.deb"
+append_binary_records "$keyring_packages" "apt/releases/download/repo"
 
 while IFS= read -r package_spec; do
   package_repository="$(jq -r '.repository' <<<"$package_spec")"
@@ -324,7 +386,7 @@ temporary_release="$work_dir/Release"
     -o APT::FTPArchive::Release::Label='Open Research Tools' \
     -o "APT::FTPArchive::Release::Suite=$metadata_suite" \
     -o "APT::FTPArchive::Release::Codename=$metadata_suite" \
-    -o APT::FTPArchive::Release::Architectures='amd64 arm64' \
+    -o APT::FTPArchive::Release::Architectures='amd64 arm64 aarch64' \
     -o APT::FTPArchive::Release::Description='Open Research Tools packages' \
     release . > "$temporary_release"
 )
