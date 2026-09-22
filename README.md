@@ -42,15 +42,24 @@ sudo apt install buzzardos
 sudo apt install buzzardos-guest buzzardos-desktop buzzardoscua
 ```
 
-PDF Markdown Studio and Transcribe Offline both depend on the co-installable
-Vulkan and CUDA engine packages. APT installs these automatically:
+On AMD64, PDF Markdown Studio and Transcribe Offline depend on the co-installable
+Vulkan and CUDA engine packages. On ARM64, both apps depend only on the Vulkan
+package `openresearchtools-engine (>= 1.17)`. APT automatically selects the
+engine package for the machine architecture; ARM64 does not require CUDA.
+The engine package names are:
 
 ```text
 openresearchtools-engine
 openresearchtools-engine-cuda
 ```
 
-To install only the engine runtimes:
+To install the Vulkan engine runtime on ARM64 or AMD64:
+
+```bash
+sudo apt install openresearchtools-engine
+```
+
+To install both engine backends on AMD64:
 
 ```bash
 sudo apt install openresearchtools-engine openresearchtools-engine-cuda
