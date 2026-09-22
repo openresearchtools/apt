@@ -165,6 +165,9 @@ prereleases are excluded. From those releases it indexes only attached `.deb`
 assets matching the configured filename pattern. GitHub Actions artifacts and
 unrelated release assets are never indexed. Debian version comparison determines
 which stable version APT selects as the default upgrade candidate.
+Identical binaries carried forward into another release are indexed once when
+the package name, version, architecture, SHA-256 digest, and size match. A
+repeated package identity with different binary content fails publication.
 
 List every indexed version or install one explicitly:
 

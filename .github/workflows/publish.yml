@@ -30,6 +30,9 @@ jobs:
           sudo apt-get install --yes --no-install-recommends \
             apt-utils ca-certificates curl dpkg-dev gnupg jq
 
+      - name: Test carried-forward package indexing
+        run: bash tests/test-carried-assets.sh
+
       - name: Build and sign repository indexes
         env:
           GH_TOKEN: ${{ github.token }}

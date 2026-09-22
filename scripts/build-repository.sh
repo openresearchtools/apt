@@ -60,6 +60,7 @@ mkdir -p "$output_dir"
 : > "$output_dir/Packages"
 
 declare -A indexed_binary_versions=()
+declare -A indexed_binary_contents=()
 
 append_binary_records() {
   local package_dir="$1"
@@ -181,10 +182,17 @@ append_remote_binary_record() {
 
   identity="$package_name|$package_version|$package_architecture"
   if [[ -n "${indexed_binary_versions[$identity]:-}" ]]; then
-    printf 'Duplicate package/version/architecture: %s\n' "$identity" >&2
+    # ARM-only releases carry forward older binaries without changing their
+    # embedded version. Index identical copies once, retaining the first URL.
+    if [[ "${indexed_binary_contents[$identity]:-}" == "$asset_size:$asset_sha256" ]]; then
+      printf 'Skipping identical carried-forward binary: %s (%s)\n' "$identity" "$asset_url" >&2
+      return 0
+    fi
+    printf 'Conflicting binary content for package/version/architecture: %s\n' "$identity" >&2
     exit 1
   fi
   indexed_binary_versions[$identity]="$asset_url"
+  indexed_binary_contents[$identity]="$asset_size:$asset_sha256"
 
   cat "$control_file" >> "$output_dir/Packages"
   printf 'Filename: %s/%s\nSize: %s\nSHA256: %s\n\n' \
