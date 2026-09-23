@@ -101,6 +101,28 @@ adding the repository does not convert Debian binaries into Android binaries.
 The Termux keyring is the initial `aarch64` package; application builds are
 published independently by their respective projects.
 
+Zotero is available as a native `aarch64` Termux package. Enable Termux's X11
+repository for its desktop dependencies, then install it by package name:
+
+```bash
+pkg install x11-repo
+apt update
+apt install zotero
+# Optional, for citations in Writer:
+apt install libreoffice
+```
+
+APT installs Zotero's required `openjdk-21` and `openjdk-21-x` dependencies
+automatically. Save documents and close LibreOffice, then use Zotero's
+**Settings → Cite → Word Processors → Install/Reinstall LibreOffice Add-in**.
+The optional Pi skill and helper are bundled at `$PREFIX/share/zotero/pi`.
+See the [Zotero Termux instructions](https://github.com/openresearchtools/zotero-termux/blob/main/termux/README.md)
+for the Termux:X11 Android app, desktop startup, and Pi setup.
+
+The hourly catalogue refresh tracks stable releases from `zotero-termux`.
+It indexes only `zotero_*_aarch64.deb`; the separately reusable Gecko build
+archive is not an additional package users need to install.
+
 Both platforms share one signed `Packages` index. Debian uses `amd64` or
 `arm64`; ARM64 Termux uses `aarch64`. Both also consider `Architecture: all`
 packages, so `all` does not mean cross-platform compatibility. The differently

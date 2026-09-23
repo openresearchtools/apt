@@ -34,5 +34,9 @@
   {
     "repository": "openresearchtools/bashkitten",
     "binary_asset_glob": "bashkitten*.deb"
+  },
+  {
+    "repository": "openresearchtools/zotero-termux",
+    "binary_asset_glob": "zotero_*_aarch64.deb"
   }
 ]
