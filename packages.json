@@ -32,10 +32,6 @@
     "binary_asset_glob": "lufus_*.deb"
   },
   {
-    "repository": "openresearchtools/termux-suite",
-    "binary_asset_glob": "bashkitten-termux-x11-*-aarch64.deb"
-  },
-  {
     "repository": "openresearchtools/bashkitten",
     "binary_asset_glob": "bashkitten*.deb"
   }
