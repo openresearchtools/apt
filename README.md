@@ -124,9 +124,10 @@ The optional Pi skill and helper are bundled at `$PREFIX/share/zotero/pi`.
 See the [Zotero Termux instructions](https://github.com/openresearchtools/zotero-termux/blob/main/termux/README.md)
 for the Termux:X11 Android app, desktop startup, and Pi setup.
 
-The hourly catalogue refresh tracks stable releases from `zotero-termux`.
-It indexes only `zotero_*_aarch64.deb`; the separately reusable Gecko build
-archive is not an additional package users need to install.
+The hourly catalogue refresh tracks stable and nightly releases from
+`zotero-termux` in their respective channels. It indexes `zotero_*.deb` for
+each published architecture; the separately reusable Gecko build archive
+is not an additional package users need to install.
 
 Both platforms share each signed `Packages` index. Debian uses `amd64` or
 `arm64`; Termux uses `x86_64` or `aarch64`. Both also consider `Architecture: all`

@@ -37,6 +37,6 @@
   },
   {
     "repository": "openresearchtools/zotero-termux",
-    "binary_asset_glob": "zotero_*_aarch64.deb"
+    "binary_asset_glob": "zotero_*.deb"
   }
 ]
