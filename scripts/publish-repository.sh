@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+versioned_setup='^openresearchtools-(archive-keyring|termux-keyring|nightly|termux-nightly)_[0-9][0-9.]*_(all|aarch64|x86_64)\.deb$'
 retry() {
   local attempt
   for attempt in 1 2 3 4 5 6; do
@@ -24,6 +25,11 @@ for channel in repo nightly; do
 
   published_assets="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$channel" --jq '.assets')"
   while IFS= read -r published_asset; do
+    # Existing installers pin dated setup packages and their checksums.
+    # Keep those bytes available when the aliases and catalogue move forward.
+    if [[ "$published_asset" =~ $versioned_setup ]]; then
+      continue
+    fi
     if [[ ! -f "$output_dir/$published_asset" ]]; then
       retry gh release delete-asset "$channel" "$published_asset" --yes
     fi
@@ -34,10 +40,14 @@ for channel in repo nightly; do
     asset_name="$(basename "$asset")"
     local_digest="sha256:$(sha256sum "$asset" | cut -d ' ' -f 1)"
     published_digest="$(jq -r --arg name "$asset_name" \
-      '.[] | select(.name == $name) | .digest // empty' <<<"$published_assets")"
+      '.[] | select(.name == $name) | .digest // "unknown"' <<<"$published_assets")"
     if [[ "$local_digest" == "$published_digest" ]]; then
       printf 'Release asset is unchanged: %s/%s\n' "$channel" "$asset_name"
       continue
+    fi
+    if [[ "$asset_name" =~ $versioned_setup && -n "$published_digest" ]]; then
+      printf 'Refusing to replace an existing versioned setup package: %s/%s\n' "$channel" "$asset_name" >&2
+      exit 1
     fi
     retry gh release upload "$channel" "$asset" --clobber
   done < <(find "$output_dir" -maxdepth 1 -type f \

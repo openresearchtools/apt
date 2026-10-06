@@ -17,11 +17,11 @@ archive_url="${APT_REPOSITORY_URL:-https://apt.openresearchtools.com}"
 metadata_suite="apt/releases/download/$channel/"
 stable_suite="apt/releases/download/repo/"
 github_organization="${GITHUB_ORGANIZATION:-openresearchtools}"
-keyring_version="${KEYRING_VERSION:-2026.08.17}"
-keyring_source_date_epoch="${KEYRING_SOURCE_DATE_EPOCH:-1786924800}"
-termux_keyring_version="${TERMUX_KEYRING_VERSION:-2026.10.06}"
+keyring_version="${KEYRING_VERSION:-2026.10.06.1}"
+keyring_source_date_epoch="${KEYRING_SOURCE_DATE_EPOCH:-1791244800}"
+termux_keyring_version="${TERMUX_KEYRING_VERSION:-2026.10.06.1}"
 termux_keyring_source_date_epoch="${TERMUX_KEYRING_SOURCE_DATE_EPOCH:-1791244800}"
-nightly_version="2026.10.06"
+nightly_version="2026.10.06.1"
 nightly_source_date_epoch="1791244800"
 termux_prefix="/data/data/com.termux/files/usr"
 archive_fingerprint="$(tr -d '[:space:]' < "$repository_root/keys/fingerprint.txt")"
@@ -228,7 +228,7 @@ cat > "$keyring_root/DEBIAN/control" <<EOF
 Package: openresearchtools-archive-keyring
 Version: $keyring_version
 Architecture: all
-Maintainer: Open Research Tools <openresearchtools@users.noreply.github.com>
+Maintainer: openresearchtools <openresearchtools@gmail.com>
 Depends: ca-certificates
 Section: misc
 Priority: optional
@@ -245,9 +245,9 @@ EOF
 cat > "$work_dir/changelog" <<EOF
 openresearchtools-archive-keyring ($keyring_version) stable; urgency=medium
 
-  * Install the Open Research Tools archive key and source.
+  * Update the maintainer contact; retain the archive key and stable source.
 
- -- Open Research Tools <openresearchtools@users.noreply.github.com>  Mon, 17 Aug 2026 00:00:00 +0000
+ -- openresearchtools <openresearchtools@gmail.com>  Tue, 06 Oct 2026 00:00:00 +0000
 EOF
 gzip -n -9 < "$work_dir/changelog" \
   > "$keyring_root/usr/share/doc/openresearchtools-archive-keyring/changelog.gz"
@@ -258,7 +258,7 @@ Upstream-Name: openresearchtools-archive-keyring
 Source: https://github.com/openresearchtools/apt
 
 Files: *
-Copyright: 2026 Open Research Tools
+Copyright: 2026 openresearchtools
 License: CC0-1.0
  The public signing key and package metadata may be copied and redistributed
  without restriction under the Creative Commons CC0 1.0 Universal dedication.
@@ -299,7 +299,7 @@ cat > "$termux_keyring_root/DEBIAN/control" <<EOF
 Package: $termux_keyring_name
 Version: $termux_keyring_version
 Architecture: $termux_arch
-Maintainer: Open Research Tools <openresearchtools@users.noreply.github.com>
+Maintainer: openresearchtools <openresearchtools@gmail.com>
 Depends: ca-certificates
 Section: misc
 Priority: optional
@@ -314,9 +314,9 @@ printf '%s\n' "$termux_prefix/etc/apt/sources.list.d/openresearchtools.sources" 
 cat > "$work_dir/termux-changelog" <<EOF
 $termux_keyring_name ($termux_keyring_version) stable; urgency=medium
 
-  * Support native Termux aarch64 and x86_64 with the existing archive key.
+  * Update the maintainer contact; retain both native architectures, key and source.
 
- -- Open Research Tools <openresearchtools@users.noreply.github.com>  Tue, 06 Oct 2026 00:00:00 +0000
+ -- openresearchtools <openresearchtools@gmail.com>  Tue, 06 Oct 2026 00:00:00 +0000
 EOF
 gzip -n -9 < "$work_dir/termux-changelog" \
   > "$termux_keyring_payload/share/doc/$termux_keyring_name/changelog.gz"
@@ -359,7 +359,7 @@ for architecture in all aarch64 x86_64; do
 Package: $package_name
 Version: $nightly_version
 Architecture: $architecture
-Maintainer: Open Research Tools <openresearchtools@users.noreply.github.com>
+Maintainer: openresearchtools <openresearchtools@gmail.com>
 Depends: $dependency
 Section: misc
 Priority: optional
@@ -384,7 +384,7 @@ Upstream-Name: $package_name
 Source: https://github.com/openresearchtools/apt
 
 Files: *
-Copyright: 2026 Open Research Tools
+Copyright: 2026 openresearchtools
 License: CC0-1.0
  The package metadata may be copied and redistributed without restriction
  under the Creative Commons CC0 1.0 Universal dedication.
