@@ -4,16 +4,25 @@ set -euo pipefail
 umask 022
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-output_dir="${OUTPUT_DIR:-$repository_root/_repo}"
+channel="${APT_CHANNEL:-repo}"
+case "$channel" in
+  repo) prerelease=false ;;
+  nightly) prerelease=true ;;
+  *) printf 'APT_CHANNEL must be repo or nightly\n' >&2; exit 1 ;;
+esac
+output_dir="${OUTPUT_DIR:-$repository_root/_repo/$channel}"
 work_dir="$(mktemp -d)"
 gnupg_home="$(mktemp -d)"
 archive_url="${APT_REPOSITORY_URL:-https://apt.openresearchtools.com}"
-metadata_suite="${APT_METADATA_SUITE:-apt/releases/download/repo/}"
+metadata_suite="apt/releases/download/$channel/"
+stable_suite="apt/releases/download/repo/"
 github_organization="${GITHUB_ORGANIZATION:-openresearchtools}"
 keyring_version="${KEYRING_VERSION:-2026.08.17}"
 keyring_source_date_epoch="${KEYRING_SOURCE_DATE_EPOCH:-1786924800}"
-termux_keyring_version="${TERMUX_KEYRING_VERSION:-2026.09.19}"
-termux_keyring_source_date_epoch="${TERMUX_KEYRING_SOURCE_DATE_EPOCH:-1789776000}"
+termux_keyring_version="${TERMUX_KEYRING_VERSION:-2026.10.06}"
+termux_keyring_source_date_epoch="${TERMUX_KEYRING_SOURCE_DATE_EPOCH:-1791244800}"
+nightly_version="2026.10.06"
+nightly_source_date_epoch="1791244800"
 termux_prefix="/data/data/com.termux/files/usr"
 archive_fingerprint="$(tr -d '[:space:]' < "$repository_root/keys/fingerprint.txt")"
 
@@ -43,12 +52,6 @@ case "$archive_url" in
     ;;
 esac
 
-if [[ "$metadata_suite" == /* || "$metadata_suite" != */ ]]; then
-  printf 'APT_METADATA_SUITE must be a relative path ending in /: %s\n' \
-    "$metadata_suite" >&2
-  exit 1
-fi
-
 if [[ ! "$keyring_source_date_epoch" =~ ^[0-9]+$ ||
       ! "$termux_keyring_source_date_epoch" =~ ^[0-9]+$ ]]; then
   printf 'Keyring SOURCE_DATE_EPOCH values must be non-negative integers\n' >&2
@@ -77,7 +80,7 @@ append_binary_records() {
       printf 'Invalid package name in %s: %s\n' "$package_file" "$package_name" >&2
       exit 1
     fi
-    if [[ ! "$package_architecture" =~ ^(all|amd64|arm64|aarch64)$ ]]; then
+    if [[ ! "$package_architecture" =~ ^(all|amd64|arm64|aarch64|x86_64)$ ]]; then
       printf 'Unsupported package architecture in %s: %s\n' \
         "$package_file" "$package_architecture" >&2
       exit 1
@@ -165,7 +168,7 @@ append_remote_binary_record() {
     printf 'Invalid package version in %s: %s\n' "$asset_name" "$package_version" >&2
     exit 1
   fi
-  if [[ ! "$package_architecture" =~ ^(all|amd64|arm64|aarch64)$ ]]; then
+  if [[ ! "$package_architecture" =~ ^(all|amd64|arm64|aarch64|x86_64)$ ]]; then
     printf 'Unsupported package architecture in %s: %s\n' \
       "$asset_name" "$package_architecture" >&2
     exit 1
@@ -200,6 +203,7 @@ append_remote_binary_record() {
     >> "$output_dir/Packages"
 }
 
+if [[ "$channel" == repo ]]; then
 keyring_root="$work_dir/keyring-root"
 keyring_packages="$work_dir/keyring-packages"
 mkdir -p \
@@ -216,7 +220,7 @@ install -m 0644 \
 cat > "$keyring_root/etc/apt/sources.list.d/openresearchtools.sources" <<EOF
 Types: deb
 URIs: $archive_url
-Suites: $metadata_suite
+Suites: $stable_suite
 Signed-By: /usr/share/keyrings/openresearchtools-archive-keyring.gpg
 EOF
 
@@ -269,6 +273,7 @@ install -m 0644 "$keyring_deb" "$output_dir/openresearchtools-archive-keyring.de
 
 # Termux uses the same archive key and flat catalogue, but its package payloads
 # must be rooted in the com.termux prefix rather than Debian's /etc and /usr.
+for termux_arch in aarch64 x86_64; do
 termux_keyring_name="openresearchtools-termux-keyring"
 termux_keyring_root="$work_dir/termux-keyring-root"
 termux_keyring_payload="$termux_keyring_root$termux_prefix"
@@ -285,15 +290,15 @@ install -m 0644 \
 cat > "$termux_keyring_payload/etc/apt/sources.list.d/openresearchtools.sources" <<EOF
 Types: deb
 URIs: $archive_url
-Suites: $metadata_suite
-Architectures: aarch64
+Suites: $stable_suite
+Architectures: $termux_arch
 Signed-By: $termux_prefix/share/keyrings/openresearchtools-archive-keyring.gpg
 EOF
 
 cat > "$termux_keyring_root/DEBIAN/control" <<EOF
 Package: $termux_keyring_name
 Version: $termux_keyring_version
-Architecture: aarch64
+Architecture: $termux_arch
 Maintainer: Open Research Tools <openresearchtools@users.noreply.github.com>
 Depends: ca-certificates
 Section: misc
@@ -301,7 +306,7 @@ Priority: optional
 Homepage: https://github.com/openresearchtools/apt
 Description: Open Research Tools APT archive key and source for Termux
  Installs the public archive key and flat repository source for native
- Android/Bionic aarch64 packages under the com.termux prefix.
+ Android/Bionic $termux_arch packages under the com.termux prefix.
 EOF
 
 printf '%s\n' "$termux_prefix/etc/apt/sources.list.d/openresearchtools.sources" \
@@ -309,9 +314,9 @@ printf '%s\n' "$termux_prefix/etc/apt/sources.list.d/openresearchtools.sources" 
 cat > "$work_dir/termux-changelog" <<EOF
 $termux_keyring_name ($termux_keyring_version) stable; urgency=medium
 
-  * Add native Termux aarch64 setup using the existing public archive key.
+  * Support native Termux aarch64 and x86_64 with the existing archive key.
 
- -- Open Research Tools <openresearchtools@users.noreply.github.com>  Sat, 19 Sep 2026 00:00:00 +0000
+ -- Open Research Tools <openresearchtools@users.noreply.github.com>  Tue, 06 Oct 2026 00:00:00 +0000
 EOF
 gzip -n -9 < "$work_dir/termux-changelog" \
   > "$termux_keyring_payload/share/doc/$termux_keyring_name/changelog.gz"
@@ -319,13 +324,84 @@ sed "s/Upstream-Name: openresearchtools-archive-keyring/Upstream-Name: $termux_k
   "$keyring_root/usr/share/doc/openresearchtools-archive-keyring/copyright" \
   > "$termux_keyring_payload/share/doc/$termux_keyring_name/copyright"
 
-termux_keyring_filename="${termux_keyring_name}_${termux_keyring_version}_aarch64.deb"
+termux_keyring_filename="${termux_keyring_name}_${termux_keyring_version}_${termux_arch}.deb"
 termux_keyring_deb="$keyring_packages/$termux_keyring_filename"
 SOURCE_DATE_EPOCH="$termux_keyring_source_date_epoch" \
   dpkg-deb --root-owner-group --build "$termux_keyring_root" "$termux_keyring_deb" >/dev/null
 install -m 0644 "$termux_keyring_deb" "$output_dir/$termux_keyring_filename"
-install -m 0644 "$termux_keyring_deb" "$output_dir/$termux_keyring_name.deb"
+install -m 0644 "$termux_keyring_deb" "$output_dir/${termux_keyring_name}_${termux_arch}.deb"
+if [[ "$termux_arch" == aarch64 ]]; then
+  install -m 0644 "$termux_keyring_deb" "$output_dir/$termux_keyring_name.deb"
+fi
+done
 append_binary_records "$keyring_packages" "apt/releases/download/repo"
+else
+# These source definitions intentionally are not conffiles. Plain apt remove
+# must disable nightly while retaining the separately installed stable keyring.
+nightly_packages="$work_dir/nightly-packages"
+mkdir -p "$nightly_packages"
+for architecture in all aarch64 x86_64; do
+  if [[ "$architecture" == all ]]; then
+    package_name="openresearchtools-nightly"
+    dependency="openresearchtools-archive-keyring"
+    package_prefix="/usr"
+    sources_dir="/etc/apt/sources.list.d"
+  else
+    package_name="openresearchtools-termux-nightly"
+    dependency="openresearchtools-termux-keyring"
+    package_prefix="$termux_prefix"
+    sources_dir="$termux_prefix/etc/apt/sources.list.d"
+  fi
+  package_root="$work_dir/$package_name-$architecture"
+  mkdir -p "$package_root/DEBIAN" "$package_root$sources_dir" \
+    "$package_root$package_prefix/share/doc/$package_name"
+  cat > "$package_root/DEBIAN/control" <<EOF
+Package: $package_name
+Version: $nightly_version
+Architecture: $architecture
+Maintainer: Open Research Tools <openresearchtools@users.noreply.github.com>
+Depends: $dependency
+Section: misc
+Priority: optional
+Homepage: https://github.com/openresearchtools/apt
+Description: Open Research Tools nightly package channel
+ Adds prerelease packages alongside the stable source, using its signing key.
+ Removing this package disables nightly without downgrading installed apps.
+EOF
+  cat > "$package_root$sources_dir/openresearchtools-nightly.sources" <<EOF
+Types: deb
+URIs: $archive_url
+Suites: $metadata_suite
+Signed-By: $package_prefix/share/keyrings/openresearchtools-archive-keyring.gpg
+EOF
+  if [[ "$architecture" != all ]]; then
+    printf 'Architectures: %s\n' "$architecture" \
+      >> "$package_root$sources_dir/openresearchtools-nightly.sources"
+  fi
+  cat > "$package_root$package_prefix/share/doc/$package_name/copyright" <<EOF
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: $package_name
+Source: https://github.com/openresearchtools/apt
+
+Files: *
+Copyright: 2026 Open Research Tools
+License: CC0-1.0
+ The package metadata may be copied and redistributed without restriction
+ under the Creative Commons CC0 1.0 Universal dedication.
+EOF
+  filename="${package_name}_${nightly_version}_${architecture}.deb"
+  SOURCE_DATE_EPOCH="$nightly_source_date_epoch" \
+    dpkg-deb --root-owner-group --build "$package_root" "$nightly_packages/$filename" >/dev/null
+  install -m 0644 "$nightly_packages/$filename" "$output_dir/$filename"
+  if [[ "$architecture" != all ]]; then
+    install -m 0644 "$nightly_packages/$filename" "$output_dir/${package_name}_${architecture}.deb"
+  fi
+  if [[ "$architecture" != x86_64 ]]; then
+    install -m 0644 "$nightly_packages/$filename" "$output_dir/$package_name.deb"
+  fi
+done
+append_binary_records "$nightly_packages" "apt/releases/download/nightly"
+fi
 
 while IFS= read -r package_spec; do
   package_repository="$(jq -r '.repository' <<<"$package_spec")"
@@ -343,6 +419,8 @@ while IFS= read -r package_spec; do
 
   repository_name="${package_repository#*/}"
   matched_repository_assets=0
+  gh api --paginate "repos/$package_repository/releases?per_page=100" \
+    > "$work_dir/releases.json"
   while IFS= read -r encoded_release; do
     release_json="$(base64 --decode <<<"$encoded_release")"
     release_tag="$(jq -r '.tag_name' <<<"$release_json")"
@@ -373,11 +451,10 @@ while IFS= read -r package_spec; do
       matched_release_assets=$((matched_release_assets + 1))
       matched_repository_assets=$((matched_repository_assets + 1))
     done < <(jq -c '.assets[]' <<<"$release_json")
-  done < <(
-    gh api --paginate "repos/$package_repository/releases?per_page=100" \
-      --jq '.[] | select(.draft == false and .prerelease == false) | @base64'
-  )
-  if [[ "$matched_repository_assets" -eq 0 ]]; then
+  done < <(jq -r --argjson prerelease "$prerelease" \
+    '.[] | select(.draft == false and .prerelease == $prerelease) | @base64' \
+    "$work_dir/releases.json")
+  if [[ "$matched_repository_assets" -eq 0 && "$channel" == repo ]]; then
     printf 'No published release assets matched %s in %s\n' \
       "$binary_asset_glob" "$package_repository" >&2
     exit 1
@@ -394,7 +471,7 @@ temporary_release="$work_dir/Release"
     -o APT::FTPArchive::Release::Label='Open Research Tools' \
     -o "APT::FTPArchive::Release::Suite=$metadata_suite" \
     -o "APT::FTPArchive::Release::Codename=$metadata_suite" \
-    -o APT::FTPArchive::Release::Architectures='amd64 arm64 aarch64' \
+    -o APT::FTPArchive::Release::Architectures='amd64 arm64 aarch64 x86_64' \
     -o APT::FTPArchive::Release::Description='Open Research Tools packages' \
     release . > "$temporary_release"
 )

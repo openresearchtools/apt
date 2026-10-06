@@ -3,8 +3,9 @@
 This repository publishes the signed package catalogue for Open Research
 Tools at `https://apt.openresearchtools.com`. Application binaries remain in
 each application's own GitHub Releases; the central `openresearchtools/apt`
-release contains only signed indexes, public-key files, and the small
-Debian and Termux keyring packages.
+releases contain only signed indexes, public-key files, and the small
+Debian and Termux setup packages. The `repo` catalogue contains normal releases;
+`nightly` contains prereleases. Neither includes draft releases.
 
 ## Installation
 
@@ -80,17 +81,19 @@ sudo apt install llama-cpp-cuda
 
 ### Native Termux: install the Termux keyring package
 
-On an ARM64 Android device running native Termux (not a Debian proot), run:
+On an ARM64 or x86-64 Android device running native Termux (not a Debian proot), run:
 
 ```bash
 pkg install wget
+architecture="$(dpkg --print-architecture)"
+case "$architecture" in aarch64|x86_64) ;; *) echo 'Unsupported architecture'; exit 1;; esac
 wget -O "$HOME/openresearchtools-termux-keyring.deb" \
-  https://github.com/openresearchtools/apt/releases/download/repo/openresearchtools-termux-keyring.deb
+  "https://github.com/openresearchtools/apt/releases/download/repo/openresearchtools-termux-keyring_${architecture}.deb"
 apt install "$HOME/openresearchtools-termux-keyring.deb"
 apt update
 ```
 
-No root or `sudo` is needed. This separately named `aarch64` package installs
+No root or `sudo` is needed. This separately named architecture-specific package installs
 the same public archive key and the same flat repository URL under
 `/data/data/com.termux/files/usr`. It also works with custom-signed Termux
 builds that retain that package name and prefix.
@@ -98,8 +101,10 @@ builds that retain that package name and prefix.
 After setup, use `apt install PACKAGE` and `apt upgrade` normally. Only
 applications actually published as native Termux/Bionic builds are usable;
 adding the repository does not convert Debian binaries into Android binaries.
-The Termux keyring is the initial `aarch64` package; application builds are
-published independently by their respective projects.
+Application builds are published independently by their respective projects.
+`https://termux.openresearchtools.com` and the undated
+`openresearchtools-termux-keyring.deb` alias download the ARM64 setup package;
+x86-64 users must select the `_x86_64.deb` asset shown above.
 
 Zotero is available as a native `aarch64` Termux package. Enable Termux's X11
 repository for its desktop dependencies, then install it by package name:
@@ -123,11 +128,63 @@ The hourly catalogue refresh tracks stable releases from `zotero-termux`.
 It indexes only `zotero_*_aarch64.deb`; the separately reusable Gecko build
 archive is not an additional package users need to install.
 
-Both platforms share one signed `Packages` index. Debian uses `amd64` or
-`arm64`; ARM64 Termux uses `aarch64`. Both also consider `Architecture: all`
+Both platforms share each signed `Packages` index. Debian uses `amd64` or
+`arm64`; Termux uses `x86_64` or `aarch64`. Both also consider `Architecture: all`
 packages, so `all` does not mean cross-platform compatibility. The differently
 named keyring packages do not replace each other during upgrades. Do not
 install the Debian keyring or other Debian-only `all` packages in Termux.
+
+### Enable or remove nightly updates
+
+Install the stable keyring explicitly as shown above first. This leaves it
+manually installed, so removing nightly and running `apt autoremove` does not
+remove the stable source. The nightly setup package also depends on that
+platform's keyring; it never overwrites its source or public key.
+
+On Debian/Ubuntu:
+
+```bash
+wget -O /tmp/openresearchtools-nightly.deb https://nightly.openresearchtools.com
+sudo apt install /tmp/openresearchtools-nightly.deb
+sudo apt update
+sudo apt upgrade
+```
+
+On native Termux:
+
+```bash
+architecture="$(dpkg --print-architecture)"
+wget -O "$HOME/openresearchtools-termux-nightly.deb" \
+  "https://github.com/openresearchtools/apt/releases/download/nightly/openresearchtools-termux-nightly_${architecture}.deb"
+apt install "$HOME/openresearchtools-termux-nightly.deb"
+apt update
+apt upgrade
+```
+
+`https://nightly-termux.openresearchtools.com` and the undated
+`openresearchtools-termux-nightly.deb` alias download the ARM64 nightly setup.
+Both architecture-specific aliases remain available on the `nightly` release.
+
+The added source uses the existing redirect and signing key:
+
+```text
+apt.openresearchtools.com/apt/releases/download/nightly/InRelease
+→ github.com/openresearchtools/apt/releases/download/nightly/InRelease
+```
+
+Stable and nightly have equal default priority. APT selects the highest
+Debian package version from either catalogue, regardless of the release date.
+Applications must use the same package names and increasing versions; for
+example `153.4 < 153.5~nightly.20261006.1 < 153.5`. A newer stable build then
+replaces the nightly automatically. A channel does not force a downgrade.
+
+To stop receiving prereleases, remove `openresearchtools-nightly` on Debian or
+`openresearchtools-termux-nightly` on Termux and run `apt update`. The package
+owns `openresearchtools-nightly.sources` as a regular file rather than a
+conffile, so **plain removal disables the source; purge is not required**.
+The stable source remains. Installed nightly applications stay installed
+until a stable package with a higher version is available. User-defined APT
+pins can override the default equal-priority selection.
 
 ### Debian/Ubuntu: manual key and source setup
 
@@ -191,8 +248,11 @@ manually uploaded source archive is used.
 
 Package sources are declared in `packages.json`. Each configured repository
 keeps its own version numbers, release schedule, architectures, and binary
-assets. The publishing workflow reads only proper GitHub Releases: drafts and
-prereleases are excluded. From those releases it indexes only attached `.deb`
+assets. The publishing workflow reads GitHub Releases into two catalogues: `repo` selects
+only non-prereleases, and `nightly` selects only prereleases. Drafts are excluded
+from both. Both use exactly the same repository list and filename patterns,
+and repositories without prereleases simply contribute no nightly packages.
+From those releases it indexes only attached `.deb`
 assets matching the configured filename pattern. GitHub Actions artifacts and
 unrelated release assets are never indexed. Debian version comparison determines
 which stable version APT selects as the default upgrade candidate.
@@ -211,8 +271,8 @@ APT can install an older version only while that GitHub release and its `.deb`
 asset still exist. Downgrading an already-installed newer package may require
 `--allow-downgrades`.
 
-The workflow can be triggered after an application publishes a release and
-also refreshes hourly. It reads only the small control section at the start of
+The workflow refreshes both catalogues hourly, on manual dispatch, and after
+a `package-released` repository dispatch. It reads only the small control section at the start of
 each remote `.deb` and uses GitHub's recorded asset size and SHA-256 digest, so
 large engine packages are not downloaded during every catalogue refresh.
 Application packages are not uploaded to the central release, committed to
@@ -247,8 +307,8 @@ Add its repository and asset patterns to `packages.json`, then run the
 `Publish APT repository metadata` workflow. All repositories can use the same
 archive key, with the appropriate user-installed keyring package for each platform.
 
-The publisher accepts `all`, `amd64`, `arm64`, and `aarch64` package metadata.
-Use `aarch64` for native Termux builds in this catalogue and keep their paths
+The publisher accepts `all`, `amd64`, `arm64`, `aarch64`, and `x86_64` package metadata.
+Use `aarch64` or `x86_64` for native Termux builds in this catalogue and keep their paths
 and dependencies compatible with Termux. Asset patterns include architectures
 without requiring a separate catalogue or signing key. Debian-specific
 `Architecture: all` packages must not be dependencies of Termux packages.
