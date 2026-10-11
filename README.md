@@ -25,6 +25,7 @@ sudo apt install llama-cpp
 sudo apt install simplehf
 sudo apt install buzzardos
 sudo apt install lufus
+sudo apt install zotero
 ```
 
 The keyring package has `Architecture: all`, so the same file works on AMD64
@@ -105,6 +106,28 @@ Application builds are published independently by their respective projects.
 `https://termux.openresearchtools.com` and the undated
 `openresearchtools-termux-keyring.deb` alias download the ARM64 setup package;
 x86-64 users must select the `_x86_64.deb` asset shown above.
+
+### Zotero on native Linux
+
+The `zotero-termux` source repository also builds native **amd64** and **arm64**
+Debian/Ubuntu Zotero packages using the updated stable source and separate Linux
+builders. Both are indexed from its stable Linux releases by the existing
+`zotero_*.deb` rule. Install with `sudo apt install zotero`; APT supplies the
+required native libraries, **default-jre**, **libreoffice-java-common** and
+**libreoffice-writer**, including their dependencies. Save documents and close
+LibreOffice, then use Zotero's **Settings → Cite → Word Processors →
+Install/Reinstall LibreOffice Add-in** and restart Writer.
+
+Linux retains normal desktop socket paths and the upstream LibreOffice plugin.
+The Termux socket compatibility library is not included. The automation defaults
+match Termux: local API access and unattended remembered-key authorization are
+enabled, with normal user controls to disable them. Updates are managed by APT;
+the built-in application updater is disabled. The optional shared Pi package is
+installed at `/usr/share/zotero/pi`.
+See the [Linux source build and installation instructions](https://github.com/openresearchtools/zotero-termux/blob/main/linux/README.md)
+and its validation record for the tested scope.
+
+### Zotero on native Termux
 
 Zotero is available as a native `aarch64` Termux package. Enable Termux's X11
 repository for its desktop dependencies, then install it by package name:
