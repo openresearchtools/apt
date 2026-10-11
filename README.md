@@ -129,7 +129,7 @@ and its validation record for the tested scope.
 
 ### Zotero on native Termux
 
-Zotero is available as a native `aarch64` Termux package. Enable Termux's X11
+Zotero is available as native `aarch64` and `x86_64` Termux packages. Enable Termux's X11
 repository for its desktop dependencies, then install it by package name:
 
 ```bash
