@@ -33,7 +33,7 @@
   },
   {
     "repository": "openresearchtools/bashkitten",
-    "binary_asset_glob": "bashkitten*.deb"
+    "binary_asset_glob": "*.deb"
   },
   {
     "repository": "openresearchtools/zotero-termux",
