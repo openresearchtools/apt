@@ -160,30 +160,43 @@ install the Debian keyring or other Debian-only `all` packages in Termux.
 
 ### Enable or remove nightly updates
 
-Install the stable keyring explicitly as shown above first. This leaves it
-manually installed, so removing nightly and running `apt autoremove` does not
-remove the stable source. The nightly setup package also depends on that
-platform's keyring; it never overwrites its source or public key.
+Prereleases use the `nightly` catalogue and the same signing key as stable
+releases. These one-liners install the setup packages and refresh APT; they do
+not upgrade your applications automatically. Run `apt upgrade` when ready
+(`sudo apt upgrade` on Debian/Ubuntu).
 
-On Debian/Ubuntu:
-
-```bash
-wget -O /tmp/openresearchtools-nightly.deb https://nightly.openresearchtools.com
-sudo apt install /tmp/openresearchtools-nightly.deb
-sudo apt update
-sudo apt upgrade
-```
-
-On native Termux:
+**Debian/Ubuntu — first-time setup, including the keyring and prereleases:**
 
 ```bash
-architecture="$(dpkg --print-architecture)"
-wget -O "$HOME/openresearchtools-termux-nightly.deb" \
-  "https://github.com/openresearchtools/apt/releases/download/nightly/openresearchtools-termux-nightly_${architecture}.deb"
-apt install "$HOME/openresearchtools-termux-nightly.deb"
-apt update
-apt upgrade
+(ort_setup="$(mktemp -d)" && trap 'rm -rf -- "$ort_setup"' EXIT && wget -qO "$ort_setup/keyring.deb" https://keyring.openresearchtools.com && wget -qO "$ort_setup/nightly.deb" https://nightly.openresearchtools.com && sudo apt install "$ort_setup/keyring.deb" "$ort_setup/nightly.deb" && sudo apt update)
 ```
+
+**Debian/Ubuntu — enable prereleases when the main keyring package is already installed:**
+
+```bash
+(ort_setup="$(mktemp -d)" && trap 'rm -rf -- "$ort_setup"' EXIT && wget -qO "$ort_setup/nightly.deb" https://nightly.openresearchtools.com && sudo apt install "$ort_setup/nightly.deb" && sudo apt update)
+```
+
+**Native Termux — first-time setup, including the keyring and prereleases:**
+
+```bash
+(pkg install wget && ort_setup="$(mktemp -d)" && trap 'rm -rf -- "$ort_setup"' EXIT && ort_arch="$(dpkg --print-architecture)" && wget -qO "$ort_setup/keyring.deb" "https://github.com/openresearchtools/apt/releases/download/repo/openresearchtools-termux-keyring_${ort_arch}.deb" && wget -qO "$ort_setup/nightly.deb" "https://github.com/openresearchtools/apt/releases/download/nightly/openresearchtools-termux-nightly_${ort_arch}.deb" && apt install "$ort_setup/keyring.deb" "$ort_setup/nightly.deb" && apt update)
+```
+
+**Native Termux — enable prereleases when the main Termux keyring package is already installed:**
+
+```bash
+(pkg install wget && ort_setup="$(mktemp -d)" && trap 'rm -rf -- "$ort_setup"' EXIT && ort_arch="$(dpkg --print-architecture)" && wget -qO "$ort_setup/nightly.deb" "https://github.com/openresearchtools/apt/releases/download/nightly/openresearchtools-termux-nightly_${ort_arch}.deb" && apt install "$ort_setup/nightly.deb" && apt update)
+```
+
+Termux commands select the published `aarch64` or `x86_64` setup package for
+the device and need no root or `sudo`. The Debian/Ubuntu commands require `wget`.
+First-time setup installs both packages explicitly, leaving the keyring manually
+installed so removing nightly and running `apt autoremove` does not remove the
+stable source. The nightly package depends on the platform's keyring and adds a
+separate source; it never replaces the stable source or public key. If you used
+manual key/source setup instead, remove that manually created source before
+switching to these keyring-package commands.
 
 `https://nightly-termux.openresearchtools.com` and the undated
 `openresearchtools-termux-nightly.deb` alias download the ARM64 nightly setup.

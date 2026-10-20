@@ -418,10 +418,12 @@ while IFS= read -r package_spec; do
   fi
 
   repository_name="${package_repository#*/}"
+  matched_repository_releases=0
   matched_repository_assets=0
   gh api --paginate "repos/$package_repository/releases?per_page=100" \
     > "$work_dir/releases.json"
   while IFS= read -r encoded_release; do
+    matched_repository_releases=$((matched_repository_releases + 1))
     release_json="$(base64 --decode <<<"$encoded_release")"
     release_tag="$(jq -r '.tag_name' <<<"$release_json")"
     matched_release_assets=0
@@ -454,7 +456,9 @@ while IFS= read -r package_spec; do
   done < <(jq -r --argjson prerelease "$prerelease" \
     '.[] | select(.draft == false and .prerelease == $prerelease) | @base64' \
     "$work_dir/releases.json")
-  if [[ "$matched_repository_assets" -eq 0 && "$channel" == repo ]]; then
+  # A repository may intentionally publish only prereleases.
+  if [[ "$matched_repository_releases" -gt 0 &&
+        "$matched_repository_assets" -eq 0 && "$channel" == repo ]]; then
     printf 'No published release assets matched %s in %s\n' \
       "$binary_asset_glob" "$package_repository" >&2
     exit 1
