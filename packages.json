@@ -32,7 +32,7 @@
     "binary_asset_glob": "lufus_*.deb"
   },
   {
-    "repository": "openresearchtools/taskarian",
+    "repository": "openresearchtools/Taskarian",
     "binary_asset_glob": "*.deb"
   },
   {
