@@ -80,6 +80,14 @@ sudo apt install llama-cpp
 sudo apt install llama-cpp-cuda
 ```
 
+### Taskarian
+
+The catalogue tracks [Taskarian](https://github.com/openresearchtools/Taskarian)
+for desktop Linux and native Termux. Testing releases appear in the `nightly`
+channel described below. After enabling that channel, install `taskarian` on
+Debian/Ubuntu or `taskarian-server` inside native Termux. APT chooses the
+published package for your architecture.
+
 ### Native Termux: install the Termux keyring package
 
 On an ARM64 or x86-64 Android device running native Termux (not a Debian proot), run:
