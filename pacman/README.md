@@ -110,6 +110,12 @@ repackages an app. Cached package metadata and conditional API responses are
 stored in the small `pacman-state` release so unchanged large packages do not
 need to be downloaded again. A failed scan leaves the live catalogue intact.
 
+`catalogue.json` can omit exact package versions with `excluded_package_versions`.
+The eGPU app's earlier `1:0.1.0-1` and `1:0.1.0-2` versions are omitted so the
+normal `0.1.1` version is selected. Their release assets remain available, and
+the retained NVIDIA driver and GPU Unlock packages remain indexed. Exclusions
+match the full package name and version in `.PKGINFO`; they do not use patterns.
+
 The existing `apt-signing` environment and its
 `APT_GPG_SIGNING_SUBKEY_B64` / `APT_KEY_PASSWORD` secrets are reused. No additional
 signing secret is needed in any application repository.

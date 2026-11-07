@@ -192,6 +192,59 @@ class SelectionTests(unittest.TestCase):
 
 
 class DatabaseTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("vercmp"), "Arch vercmp not installed")
+    def test_epoch_migration_excludes_only_named_app_versions_in_every_channel(self):
+        name = "omarchy-mac-egpu-plug"
+        config = {"catalogue_repository": "openresearchtools/apt", "architectures": ["aarch64"],
+                  "excluded_package_versions": {name: ["1:0.1.0-1", "1:0.1.0-2"]}}
+        stable = [package(name=name, version="1:0.1.0-1"),
+                  package(name=name, version="1:0.1.0-2"),
+                  package(name=name, version="0.1.1-1"),
+                  package(name="nvidia-open-egpu-dkms", version="615.78.08-6"),
+                  package(name="omarchy-mac-egpu-plug-gpu-unlock-dkms", version="2.0.0-3"),
+                  package(name="unrelated", version="1:0.1.0-1")]
+        candidates = stable + [dataclasses.replace(item, prerelease=True) for item in stable]
+        compare = c.VersionComparator()
+        # Arch epochs otherwise keep the older application ahead of 0.1.1.
+        self.assertGreater(compare("1:0.1.0-1", "0.1.1-1"), 0)
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            summary = c.build_catalogues(config, candidates, output, compare)
+            expected = {item.name: item.version for item in stable[2:]}
+            for channel in ("stable", "nightly", "testing"):
+                tag = f"pacman-{channel}-aarch64"
+                actual = {item["name"]: item["version"] for item in summary["catalogues"][tag]["packages"]}
+                self.assertEqual(actual, expected)
+                with tarfile.open(output / tag / "openresearchtools.db") as archive:
+                    self.assertIn(f"{name}-0.1.1-1/desc", archive.getnames())
+                    self.assertNotIn(f"{name}-1:0.1.0-1/desc", archive.getnames())
+            self.assertEqual({row["version"] for row in summary["excluded_packages"]},
+                             {"1:0.1.0-1", "1:0.1.0-2"})
+
+    def test_invalid_exclusions_fail_before_any_database_is_written(self):
+        invalid = [[], {"../bad": ["1.0-1"]}, {"demo": "1.0-1"},
+                   {"demo": []}, {"demo": ["*"]}, {"demo": ["1.0-1\n"]}, {"demo": [1]}]
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "catalogues"
+            for excluded in invalid:
+                with self.subTest(excluded=excluded), self.assertRaises(c.CatalogueError):
+                    c.build_catalogues({"catalogue_repository": "org/catalogue",
+                                        "excluded_package_versions": excluded},
+                                       [package()], output, ordered)
+                self.assertFalse(output.exists())
+
+    def test_version_exclusions_are_exact_and_optional(self):
+        self.assertEqual(c.excluded_package_versions({}), {})
+        self.assertEqual(c.excluded_package_versions({"excluded_package_versions": {
+            "demo": ["1:0.1.0-1"]}}), {"demo": {"1:0.1.0-1"}})
+        with tempfile.TemporaryDirectory() as directory:
+            summary = c.build_catalogues({"catalogue_repository": "org/catalogue",
+                                          "architectures": ["aarch64"],
+                                          "excluded_package_versions": {"demo": ["1:0.1.0-1"]}},
+                                         [package(version="1:0.1.0-3")], Path(directory), ordered)
+            self.assertEqual(summary["catalogues"]["pacman-stable-aarch64"]["packages"][0]["version"],
+                             "1:0.1.0-3")
+
     def test_desc_has_supported_signed_url_extension_and_dependencies(self):
         demo = package()
         demo.info["xdata"] = ["pkgtype=pkg", "ort_download_url=https://old.invalid"]

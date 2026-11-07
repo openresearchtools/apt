@@ -447,6 +447,25 @@ def save_state(path: Path, state: dict[str, Any]) -> None:
     temporary.replace(path)
 
 
+def excluded_package_versions(config: dict[str, Any]) -> dict[str, set[str]]:
+    """Validate exact metadata identities; exclusions never use glob matching."""
+    excluded = config.get("excluded_package_versions", {})
+    if not isinstance(excluded, dict):
+        raise CatalogueError("excluded_package_versions must be an object")
+    result = {}
+    for name, versions in excluded.items():
+        if not isinstance(name, str) or not NAME_RE.fullmatch(name):
+            raise CatalogueError("Invalid package name in excluded_package_versions")
+        if not isinstance(versions, list) or not versions:
+            raise CatalogueError(f"Excluded versions for {name} must be a nonempty list")
+        if any(not isinstance(version, str) or not re.fullmatch(
+                r"[A-Za-z0-9.+_:~]+-[0-9]+(?:\.[0-9]+)*", version)
+               for version in versions):
+            raise CatalogueError(f"Invalid exact package version excluded for {name}")
+        result[name] = set(versions)
+    return result
+
+
 def build_catalogues(config: dict[str, Any], packages: list[Package], output: Path,
                      compare: Callable[[str, str], int], epoch: int = 0) -> dict[str, Any]:
     validate_repository(config["catalogue_repository"])
@@ -458,7 +477,14 @@ def build_catalogues(config: dict[str, Any], packages: list[Package], output: Pa
         raise CatalogueError("Invalid catalogue release tag prefix")
     # Detect reused identities with different bytes across channels as well.
     deduplicate(packages)
-    summary: dict[str, Any] = {"catalogue_repository": config["catalogue_repository"], "catalogues": {}}
+    excluded = excluded_package_versions(config)
+    omitted = [package for package in packages if package.version in excluded.get(package.name, set())]
+    packages = [package for package in packages if package.version not in excluded.get(package.name, set())]
+    summary: dict[str, Any] = {
+        "catalogue_repository": config["catalogue_repository"], "catalogues": {},
+        "excluded_packages": [{"name": package.name, "version": package.version,
+                               "arch": package.arch, "source": package.source}
+                              for package in deduplicate(omitted)]}
     planned = []
     for channel in ("stable", "nightly", "testing"):
         for architecture in config.get("architectures", ["x86_64", "aarch64"]):
@@ -495,6 +521,7 @@ def main(argv: list[str] | None = None) -> int:
         if len(args.local_package) != len(args.local_url):
             raise CatalogueError("Every --local-package needs a matching --local-url, in the same order")
         config = json.loads(args.config.read_text())
+        excluded_package_versions(config)
         if config.get("repositories") is None and config.get("discovery", "owner") == "manifest":
             manifest = args.config.parent / config["repositories_file"]
             entries = json.loads(manifest.read_text())
