@@ -2,11 +2,13 @@
 """Offline publisher tests: no GitHub tokens or upstream requests needed."""
 
 import dataclasses
+import base64
 import gzip
 import hashlib
 import io
 import json
 import lzma
+import os
 from pathlib import Path
 import random
 import shutil
@@ -295,6 +297,45 @@ class DiscoveryTests(unittest.TestCase):
 
 
 class PublishTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("gpg") and shutil.which("gpgconf"), "GnuPG not installed")
+    def test_existing_encrypted_subkey_format_signs_and_checks_fingerprint(self):
+        with tempfile.TemporaryDirectory(prefix="ort-signing-envelope-test-") as directory:
+            root = Path(directory)
+            home = root / "gpg"; home.mkdir(mode=0o700)
+            environment = dict(os.environ, GNUPGHOME=str(home))
+            password = "fixture-only-envelope-password"
+            def gpg(*arguments, data=None):
+                return subprocess.run(["gpg", "--batch", "--yes", "--pinentry-mode", "loopback", *arguments],
+                                      env=environment, input=data, capture_output=True, check=True).stdout
+            try:
+                gpg("--passphrase", "", "--quick-generate-key", "ORT fixture <fixture@example.invalid>", "ed25519", "cert", "0")
+                listing = gpg("--with-colons", "--list-secret-keys").decode()
+                fingerprint = next(line.split(":")[9] for line in listing.splitlines() if line.startswith("fpr:"))
+                gpg("--passphrase", "", "--quick-add-key", fingerprint, "ed25519", "sign", "0")
+                exported = root / "subkey-export.gpg"
+                exported.write_bytes(gpg("--export-secret-subkeys", fingerprint))
+                exported.chmod(0o600)
+                encrypted = root / "encrypted-subkey.gpg"
+                gpg("--passphrase-fd", "0", "--output", str(encrypted), "--symmetric", str(exported), data=(password + "\n").encode())
+                secrets = {
+                    "APT_GPG_SIGNING_SUBKEY_B64": base64.b64encode(encrypted.read_bytes()).decode(),
+                    "APT_KEY_PASSWORD": password,
+                }
+                payload = root / "openresearchtools.db"; payload.write_bytes(b"fixture catalogue")
+                with mock.patch.dict(os.environ, secrets):
+                    with pub.signing_environment(fingerprint) as signing:
+                        signature = pub.sign(payload, signing, fingerprint)
+                        self.assertTrue(signature.is_file())
+                    with self.assertRaisesRegex(pub.PublishError, "does not match"):
+                        with pub.signing_environment("0" * 40):
+                            self.fail("Mismatched signing key was accepted")
+                with mock.patch.dict(os.environ, {**secrets, "APT_KEY_PASSWORD": "wrong-fixture-password"}):
+                    with self.assertRaisesRegex(pub.PublishError, "Could not decrypt"):
+                        with pub.signing_environment(fingerprint):
+                            self.fail("Wrong envelope password was accepted")
+            finally:
+                subprocess.run(["gpgconf", "--kill", "all"], env=environment, capture_output=True)
+
     def test_atomic_bundle_contains_exact_database_and_matching_signature(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -152,13 +152,35 @@ def signing_environment(expected_fingerprint: str):
         raise PublishError("APT_GPG_SIGNING_SUBKEY_B64 is not valid base64") from error
     if not key or len(key) > 1024 * 1024:
         raise PublishError("Unexpected signing-subkey size")
+    password = os.environ.get("APT_KEY_PASSWORD", "")
+    if not password:
+        raise PublishError("The apt-signing environment needs APT_KEY_PASSWORD")
     with tempfile.TemporaryDirectory(prefix="ort-pacman-gnupg-") as directory:
         Path(directory).chmod(0o700)
         environment = dict(os.environ, GNUPGHOME=directory)
         try:
-            command(["gpg", "--batch", "--no-tty", "--import"], env=environment, data=key)
-            listing = command(["gpg", "--batch", "--with-colons", "--list-secret-keys",
-                               expected_fingerprint], env=environment).decode()
+            # The existing APT secret is a symmetrically encrypted export, not
+            # a directly importable key. Match build-repository.sh: decrypt the
+            # envelope first, then import its output through stdin. Plaintext
+            # signing material is never written to an intermediate file.
+            encrypted = Path(directory) / "ci-signing-subkey.gpg"
+            encrypted.write_bytes(key)
+            encrypted.chmod(0o600)
+            try:
+                decrypted = command([
+                    "gpg", "--batch", "--yes", "--quiet", "--no-tty",
+                    "--pinentry-mode", "loopback", "--passphrase-fd", "0",
+                    "--output", "-", "--decrypt", str(encrypted),
+                ], env=environment, data=(password + "\n").encode())
+            except PublishError as error:
+                raise PublishError("Could not decrypt the existing APT signing-subkey envelope") from error
+            try:
+                command(["gpg", "--batch", "--no-tty", "--import"], env=environment, data=decrypted)
+            except PublishError as error:
+                raise PublishError("Could not import the decrypted APT signing subkey") from error
+            finally:
+                decrypted = b""
+            listing = command(["gpg", "--batch", "--with-colons", "--list-secret-keys"], env=environment).decode()
             fingerprints = [line.split(":")[9] for line in listing.splitlines() if line.startswith("fpr:")]
             if expected_fingerprint not in fingerprints:
                 raise PublishError("Imported signing key does not match the existing archive fingerprint")
