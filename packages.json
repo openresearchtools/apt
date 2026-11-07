@@ -38,5 +38,9 @@
   {
     "repository": "openresearchtools/zotero-termux",
     "binary_asset_glob": "zotero_*.deb"
+  },
+  {
+    "repository": "openresearchtools/omarchy-mac-egpu-plug",
+    "binary_asset_glob": "omarchy-mac-egpu-plug_*.deb"
   }
 ]
