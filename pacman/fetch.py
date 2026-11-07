@@ -1,0 +1,298 @@
+#!/usr/bin/env python3
+"""Pacman's external downloader for the GitHub-only ORT catalogue.
+
+Pacman verifies the signed sync database and package checksums. This helper
+only resolves a package's flat filename using its signed ``DATA`` entry; it
+never executes commands obtained from repository metadata.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import platform
+import re
+import subprocess
+import sys
+import tarfile
+import tempfile
+from pathlib import Path
+from urllib.parse import unquote, urlsplit
+
+
+CONFIG_PATH = Path("/etc/openresearchtools-pacman.json")
+DATABASE_NAME = "openresearchtools"
+DOWNLOAD_DATA_KEY = "ort_download_url"
+PACKAGE_SUFFIX = re.compile(r"\.pkg\.tar(?:\.(?:zst|xz|gz|bz2|lz4|lrz|lzo|lz|Z))?$")
+REPOSITORY_NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z")
+OWNER_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*\Z")
+MAX_DESC_BYTES = 1024 * 1024
+MAX_CATALOGUE_ENTRIES = 100_000
+BUNDLE_NAME = DATABASE_NAME + ".catalogue.tar.gz"
+MAX_BUNDLE_BYTES = 128 * 1024 * 1024
+MAX_SIGNATURE_BYTES = 1024 * 1024
+
+
+class FetchError(ValueError):
+    """An invalid configuration or catalogue must not fall back to a download."""
+
+
+def normalize_architecture(value: str | None = None) -> str:
+    value = value or platform.machine()
+    value = {"amd64": "x86_64", "arm64": "aarch64"}.get(value, value)
+    if value not in {"x86_64", "aarch64"}:
+        raise FetchError(f"Unsupported architecture: {value!r}")
+    return value
+
+
+def validate_configuration(value: object) -> dict:
+    if not isinstance(value, dict):
+        raise FetchError("The downloader configuration must be a JSON object")
+    config = dict(value)
+    repository = config.get("catalogue_repository", "openresearchtools/apt")
+    if not isinstance(repository, str) or not REPOSITORY_NAME.fullmatch(repository):
+        raise FetchError("catalogue_repository must be an owner/repository name")
+    if any(part in {".", ".."} for part in repository.split("/")):
+        raise FetchError("Invalid catalogue_repository")
+    channel = config.get("channel", "stable")
+    if not isinstance(channel, str) or channel not in {"stable", "nightly", "testing"}:
+        raise FetchError("channel must be stable, nightly, or testing")
+    architecture = config.get("architecture")
+    if architecture is not None and not isinstance(architecture, str):
+        raise FetchError("architecture must be a string")
+    owners = config.get("allowed_owners", ["openresearchtools"])
+    if not isinstance(owners, list) or not owners or any(
+        not isinstance(owner, str) or not OWNER_NAME.fullmatch(owner) for owner in owners
+    ):
+        raise FetchError("allowed_owners must be a nonempty list of GitHub owners")
+    db_path = config.get("db_path", f"/var/lib/pacman/sync/{DATABASE_NAME}.db")
+    if not isinstance(db_path, str) or not Path(db_path).is_absolute():
+        raise FetchError("db_path must be an absolute filesystem path")
+    if "replace_downloader" in config and not isinstance(config["replace_downloader"], bool):
+        raise FetchError("replace_downloader must be a JSON boolean")
+    config.update(
+        catalogue_repository=repository,
+        channel=channel,
+        architecture=normalize_architecture(architecture),
+        allowed_owners=sorted({owner.lower() for owner in owners}),
+        db_path=db_path,
+    )
+    return config
+
+
+def load_configuration(path: Path = CONFIG_PATH) -> dict:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise FetchError(f"Cannot read downloader configuration {path}: {exc}") from exc
+    return validate_configuration(value)
+
+
+def server_url(config: dict) -> str:
+    return (
+        f"https://github.com/{config['catalogue_repository']}/releases/download/"
+        f"pacman-{config['channel']}-{config['architecture']}"
+    )
+
+
+def parse_description(text: str) -> dict[str, list[str]]:
+    fields: dict[str, list[str]] = {}
+    key = None
+    for line in text.splitlines():
+        if line.startswith("%") and line.endswith("%"):
+            key = line[1:-1]
+            if key in fields:
+                raise FetchError(f"Duplicate catalogue field %{key}%")
+            fields[key] = []
+        elif not line:
+            key = None
+        elif key is not None:
+            fields[key].append(line)
+    return fields
+
+
+def validate_download_url(url: str, config: dict) -> str:
+    parsed = urlsplit(url)
+    if (
+        parsed.scheme != "https"
+        or parsed.netloc != "github.com"
+        or parsed.query
+        or parsed.fragment
+        or any(character.isspace() or ord(character) < 32 for character in url)
+    ):
+        raise FetchError("Package routes must be HTTPS GitHub release-asset URLs")
+    parts = parsed.path.split("/")
+    if (
+        len(parts) < 7
+        or parts[0] != ""
+        or parts[3:5] != ["releases", "download"]
+        or not all(parts[1:3] + parts[5:])
+        or parts[1].lower() not in config["allowed_owners"]
+        or not REPOSITORY_NAME.fullmatch("/".join(parts[1:3]))
+        or any(unquote(part) in {".", ".."} for part in parts[1:])
+    ):
+        raise FetchError("Package route is not an allowed immutable GitHub release asset")
+    return url
+
+
+def catalogue_download_url(filename: str, config: dict) -> str:
+    matches: list[str] = []
+    total = 0
+    try:
+        with tarfile.open(config["db_path"], "r:*") as archive:
+            for count, member in enumerate(archive, 1):
+                if count > MAX_CATALOGUE_ENTRIES:
+                    raise FetchError("The sync database contains too many entries")
+                total += member.size
+                if total > MAX_BUNDLE_BYTES:
+                    raise FetchError("The sync database exceeds the metadata size limit")
+                if not member.isfile() or not member.name.endswith("/desc"):
+                    continue
+                if member.size > MAX_DESC_BYTES:
+                    raise FetchError("The sync database contains an oversized description")
+                stream = archive.extractfile(member)
+                if stream is None:
+                    raise FetchError("Cannot read sync database description")
+                fields = parse_description(stream.read(MAX_DESC_BYTES + 1).decode("utf-8"))
+                if fields.get("FILENAME") != [filename]:
+                    continue
+                routes = [
+                    item.split("=", 1)[1]
+                    for item in fields.get("DATA", [])
+                    if item.startswith(DOWNLOAD_DATA_KEY + "=")
+                ]
+                if len(routes) != 1:
+                    raise FetchError(f"Missing or ambiguous download route for {filename}")
+                matches.append(routes[0])
+    except (OSError, tarfile.TarError, UnicodeError) as exc:
+        raise FetchError(f"Cannot read sync database {config['db_path']}: {exc}") from exc
+    if len(matches) != 1:
+        raise FetchError(f"Expected one catalogue entry for {filename}; found {len(matches)}")
+    return validate_download_url(matches[0], config)
+
+
+def resolve_url(url: str, config: dict) -> str:
+    prefix = server_url(config) + "/"
+    if not url.startswith(prefix):
+        return url
+    filename = url[len(prefix):]
+    if any(character in filename for character in "/?#") or unquote(filename) != filename:
+        raise FetchError("Invalid flat repository filename")
+    signature = filename.endswith(".sig")
+    package_filename = filename[:-4] if signature else filename
+    if not PACKAGE_SUFFIX.search(package_filename):
+        return url  # Sync database, its signature, and other metadata.
+    target = catalogue_download_url(package_filename, config)
+    return target + ".sig" if signature else target
+
+
+def download(url: str, output: str, maximum_size: int | None = None) -> int:
+    # Use argv throughout: filenames and URLs never become shell code.
+    command = [
+        "/usr/bin/curl", "--fail", "--location", "--retry", "3",
+        "--connect-timeout", "30", "--continue-at", "-", "--output", output,
+    ]
+    if maximum_size is not None:
+        command.extend(["--max-filesize", str(maximum_size)])
+    command.extend(["--", url])
+    try:
+        return subprocess.run(command, check=False).returncode
+    except OSError as exc:
+        raise FetchError(f"Cannot run curl: {exc}") from exc
+
+
+def read_catalogue_bundle(path: Path) -> tuple[bytes, bytes]:
+    """Read only the two expected regular files, without extracting paths."""
+    if path.stat().st_size > MAX_BUNDLE_BYTES:
+        raise FetchError("The catalogue bundle exceeds the metadata size limit")
+    expected = {DATABASE_NAME + ".db", DATABASE_NAME + ".db.sig"}
+    contents: dict[str, bytes] = {}
+    total = 0
+    try:
+        with tarfile.open(path, "r:gz") as archive:
+            for member in archive:
+                if member.name not in expected or member.name in contents or not member.isfile():
+                    raise FetchError("The catalogue bundle must contain exactly the database and its signature")
+                maximum = MAX_SIGNATURE_BYTES if member.name.endswith(".sig") else MAX_BUNDLE_BYTES
+                total += member.size
+                if member.size < 1 or member.size > maximum or total > MAX_BUNDLE_BYTES:
+                    raise FetchError("The catalogue bundle exceeds the metadata size limit")
+                stream = archive.extractfile(member)
+                if stream is None:
+                    raise FetchError("Cannot read catalogue bundle member")
+                data = stream.read(maximum + 1)
+                if len(data) != member.size:
+                    raise FetchError("The catalogue bundle is truncated")
+                contents[member.name] = data
+    except (OSError, tarfile.TarError, EOFError) as exc:
+        raise FetchError(f"Cannot read catalogue bundle: {exc}") from exc
+    if contents.keys() != expected:
+        raise FetchError("The catalogue bundle is missing the database or its signature")
+    return contents[DATABASE_NAME + ".db"], contents[DATABASE_NAME + ".db.sig"]
+
+
+def write_download(path: Path, data: bytes):
+    descriptor, temporary = tempfile.mkstemp(prefix=".ort-download-", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(data)
+        os.chmod(temporary, 0o644)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def signature_stash(output: Path, config: dict) -> Path:
+    namespace = hashlib.sha256(server_url(config).encode()).hexdigest()[:24]
+    return output.parent / (".ort-db-signature-" + namespace)
+
+
+def fetch_url(url: str, output: str, config: dict) -> int:
+    """Keep the mutable GitHub catalogue's database/signature generation paired."""
+    prefix = server_url(config) + "/"
+    destination = Path(output)
+    if url == prefix + DATABASE_NAME + ".db":
+        stash = signature_stash(destination, config)
+        stash.unlink(missing_ok=True)
+        with tempfile.TemporaryDirectory(prefix=".ort-catalogue-", dir=destination.parent) as temporary:
+            bundle = Path(temporary) / BUNDLE_NAME
+            result = download(prefix + BUNDLE_NAME, str(bundle), MAX_BUNDLE_BYTES)
+            if result:
+                return result
+            database, signature = read_catalogue_bundle(bundle)
+            write_download(stash, signature)
+            write_download(destination, database)
+        return 0
+    if url == prefix + DATABASE_NAME + ".db.sig":
+        stash = signature_stash(destination, config)
+        try:
+            if stash.stat().st_size > MAX_SIGNATURE_BYTES:
+                raise FetchError("The staged database signature is too large")
+            signature = stash.read_bytes()
+        except OSError as exc:
+            raise FetchError("No matching database signature is staged; refresh the catalogue database first") from exc
+        write_download(destination, signature)
+        stash.unlink()
+        return 0
+    return download(resolve_url(url, config), output)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", type=Path, default=CONFIG_PATH)
+    parser.add_argument("url")
+    parser.add_argument("output", help="Pacman's %%o destination, including .part")
+    args = parser.parse_args(argv)
+    try:
+        config = load_configuration(args.config)
+        return fetch_url(args.url, args.output, config)
+    except (FetchError, OSError) as exc:
+        print(f"openresearchtools-pacman-fetch: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

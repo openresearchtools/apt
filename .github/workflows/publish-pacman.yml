@@ -1,0 +1,61 @@
+name: Publish GitHub-only pacman catalogues
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [package-released]
+  schedule:
+    - cron: '37 * * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pacman-repository-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Scan, sign, and publish native Arch catalogue metadata
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    timeout-minutes: 45
+    environment: apt-signing
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_DATE_EPOCH: '0'
+    steps:
+      - name: Install publisher and test tools
+        run: pacman -Syu --noconfirm --needed python python-zstandard github-cli git curl gnupg
+
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Test catalogue and downloader
+        run: |
+          python -m unittest discover -s pacman/tests -p 'test_*.py'
+          python pacman/tests/integration.py
+
+      - name: Restore incremental scanner state
+        run: python pacman/publish.py --mode restore --repository "$GITHUB_REPOSITORY"
+
+      - name: Build small client setup package and scan native Arch assets
+        shell: bash
+        run: |
+          bootstrap_file="$(python pacman/build-bootstrap.py --output _repo/pacman-bootstrap --repository "$GITHUB_REPOSITORY")"
+          python pacman/catalogue.py \
+            --config pacman/catalogue.json \
+            --output _repo/pacman \
+            --state _repo/pacman-state.json \
+            --local-package "$bootstrap_file" \
+            --local-url "https://github.com/$GITHUB_REPOSITORY/releases/download/pacman-tools/$(basename "$bootstrap_file")"
+
+      - name: Sign with existing archive key and publish metadata
+        env:
+          APT_GPG_SIGNING_SUBKEY_B64: ${{ secrets.APT_GPG_SIGNING_SUBKEY_B64 }}
+          APT_KEY_PASSWORD: ${{ secrets.APT_KEY_PASSWORD }}
+        run: python pacman/publish.py --mode publish --repository "$GITHUB_REPOSITORY"
+
+      - name: Preserve scanner progress, including after API limits
+        if: always()
+        run: python pacman/publish.py --mode state --repository "$GITHUB_REPOSITORY"

@@ -6,3 +6,5 @@
 
 # Generated repository output.
 _repo/
+__pycache__/
+*.py[cod]

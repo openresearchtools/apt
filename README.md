@@ -1,5 +1,10 @@
 # Open Research Tools APT repository
 
+Native Arch Linux and Omarchy packages are available through a separate
+GitHub-only catalogue. See [Arch/Omarchy installation and channels](pacman/README.md).
+The existing Debian/Ubuntu and Termux `.deb` catalogues described below keep
+their own architecture selection and package formats.
+
 This repository publishes the signed package catalogue for Open Research
 Tools at `https://apt.openresearchtools.com`. Application binaries remain in
 each application's own GitHub Releases; the central `openresearchtools/apt`

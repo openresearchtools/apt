@@ -1,0 +1,14 @@
+{
+  "owner": "openresearchtools",
+  "catalogue_repository": "openresearchtools/apt",
+  "architectures": ["x86_64", "aarch64"],
+  "repositories_file": "../packages.json",
+  "repositories": null,
+  "discovery": "manifest",
+  "exclude_repositories": [],
+  "asset_globs": ["*.pkg.tar.zst", "*.pkg.tar.xz", "*.pkg.tar.gz"],
+  "release_tag_prefix": "pacman",
+  "repository_name": "openresearchtools",
+  "max_compressed_metadata_bytes": 16777216,
+  "max_uncompressed_metadata_bytes": 67108864
+}
