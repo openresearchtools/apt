@@ -40,7 +40,7 @@
     "binary_asset_glob": "zotero_*.deb"
   },
   {
-    "repository": "openresearchtools/omarchy-mac-egpu-plug",
+    "repository": "openresearchtools/omarchy-egpu",
     "apt": false
   }
 ]
