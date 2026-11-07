@@ -2,8 +2,9 @@
 """Pacman's external downloader for the GitHub-only ORT catalogue.
 
 Pacman verifies the signed sync database and package checksums. This helper
-only resolves a package's flat filename using its signed ``DATA`` entry; it
-never executes commands obtained from repository metadata.
+resolves a package's flat filename using its signed ``DATA`` entry and checks
+the downloaded bytes before accepting a resumed transfer. It never executes
+commands obtained from repository metadata.
 """
 
 from __future__ import annotations
@@ -137,8 +138,11 @@ def validate_download_url(url: str, config: dict) -> str:
     return url
 
 
-def catalogue_download_url(filename: str, config: dict) -> str:
-    matches: list[str] = []
+def catalogue_package(filename: str, config: dict) -> tuple[str, str, int]:
+    """Read a package route and integrity metadata from the signed sync DB."""
+    if any(character in filename for character in "/?#") or unquote(filename) != filename:
+        raise FetchError("Invalid flat repository filename")
+    matches: list[tuple[str, str, int]] = []
     total = 0
     try:
         with tarfile.open(config["db_path"], "r:*") as archive:
@@ -165,12 +169,26 @@ def catalogue_download_url(filename: str, config: dict) -> str:
                 ]
                 if len(routes) != 1:
                     raise FetchError(f"Missing or ambiguous download route for {filename}")
-                matches.append(routes[0])
+                digests = fields.get("SHA256SUM", [])
+                sizes = fields.get("CSIZE", [])
+                if len(digests) != 1 or not re.fullmatch(r"[a-fA-F0-9]{64}", digests[0]):
+                    raise FetchError(f"Missing or invalid signed SHA-256 for {filename}")
+                if len(sizes) != 1 or not re.fullmatch(r"[1-9][0-9]*", sizes[0]):
+                    raise FetchError(f"Missing or invalid signed download size for {filename}")
+                try:
+                    size = int(sizes[0])
+                except ValueError as exc:
+                    raise FetchError(f"Invalid signed download size for {filename}") from exc
+                matches.append((validate_download_url(routes[0], config), digests[0].lower(), size))
     except (OSError, tarfile.TarError, UnicodeError) as exc:
         raise FetchError(f"Cannot read sync database {config['db_path']}: {exc}") from exc
     if len(matches) != 1:
         raise FetchError(f"Expected one catalogue entry for {filename}; found {len(matches)}")
-    return validate_download_url(matches[0], config)
+    return matches[0]
+
+
+def catalogue_download_url(filename: str, config: dict) -> str:
+    return catalogue_package(filename, config)[0]
 
 
 def resolve_url(url: str, config: dict) -> str:
@@ -188,19 +206,60 @@ def resolve_url(url: str, config: dict) -> str:
     return target + ".sig" if signature else target
 
 
-def download(url: str, output: str, maximum_size: int | None = None) -> int:
+def download(url: str, output: str, maximum_size: int | None = None,
+             quiet_not_found: bool = False) -> int:
     # Use argv throughout: filenames and URLs never become shell code.
     command = [
-        "/usr/bin/curl", "--fail", "--location", "--retry", "3",
+        "/usr/bin/curl", "--fail", "--location", "--retry", "3", "--progress-bar",
         "--connect-timeout", "30", "--continue-at", "-", "--output", output,
     ]
     if maximum_size is not None:
         command.extend(["--max-filesize", str(maximum_size)])
+    if quiet_not_found:
+        command.extend(["--silent", "--show-error", "--write-out", "%{http_code}"])
     command.extend(["--", url])
     try:
-        return subprocess.run(command, check=False).returncode
+        if not quiet_not_found:
+            return subprocess.run(command, check=False).returncode
+        result = subprocess.run(command, check=False, text=True, capture_output=True)
+        # Some foreign repositories have no detached database signature. Keep
+        # the failing status so pacman applies its own optional/required policy;
+        # suppress only this expected HTTP 404 diagnostic, never other failures.
+        if not (result.returncode == 22 and result.stdout.strip() == "404"):
+            sys.stderr.write(result.stderr)
+        return result.returncode
     except OSError as exc:
         raise FetchError(f"Cannot run curl: {exc}") from exc
+
+
+def package_matches(path: Path, digest: str, size: int) -> bool:
+    try:
+        if not path.is_file() or path.stat().st_size != size:
+            return False
+        checksum = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                checksum.update(chunk)
+        return checksum.hexdigest() == digest
+    except OSError:
+        return False
+
+
+def download_package(url: str, output: str, digest: str, size: int) -> int:
+    """Retain valid resumes, but recover a corrupt partial with one clean try."""
+    destination = Path(output)
+    for attempt in range(2):
+        result = download(url, output)
+        if result:
+            return result
+        if package_matches(destination, digest, size):
+            return 0
+        # This is precisely pacman's requested partial output. Do not remove
+        # any neighbouring cached package or bypass pacman's own validation.
+        destination.unlink(missing_ok=True)
+        if attempt == 0:
+            print("openresearchtools-pacman-fetch: Download checksum or size differs from the signed catalogue; retrying once from the beginning.", file=sys.stderr)
+    raise FetchError("Package checksum or size still differs from the signed catalogue after a fresh retry; the invalid partial download was removed")
 
 
 def read_catalogue_bundle(path: Path) -> tuple[bytes, bytes]:
@@ -277,6 +336,11 @@ def fetch_url(url: str, output: str, config: dict) -> int:
         write_download(destination, signature)
         stash.unlink()
         return 0
+    if url.startswith(prefix) and PACKAGE_SUFFIX.search(url[len(prefix):]):
+        target, digest, size = catalogue_package(url[len(prefix):], config)
+        return download_package(target, output, digest, size)
+    if not url.startswith(prefix) and urlsplit(url).path.endswith(".db.sig"):
+        return download(url, output, quiet_not_found=True)
     return download(resolve_url(url, config), output)
 
 

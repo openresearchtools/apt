@@ -35,7 +35,7 @@ Install the small setup package once:
 
 ```bash
 curl -fL --retry 3 -o /tmp/openresearchtools-pacman.pkg.tar.gz \
-  https://github.com/openresearchtools/apt/releases/download/pacman-tools/openresearchtools-pacman-0.1.0-1-any.pkg.tar.gz
+  https://github.com/openresearchtools/apt/releases/download/pacman-tools/openresearchtools-pacman-0.1.1-1-any.pkg.tar.gz
 sudo pacman -U /tmp/openresearchtools-pacman.pkg.tar.gz
 sudo openresearchtools-pacman-setup --apply --channel stable
 omarchy update
