@@ -41,6 +41,6 @@
   },
   {
     "repository": "openresearchtools/omarchy-mac-egpu-plug",
-    "binary_asset_glob": "omarchy-mac-egpu-plug_*.deb"
+    "apt": false
   }
 ]

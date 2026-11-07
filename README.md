@@ -356,6 +356,9 @@ files. Its release tag must identify the source used to build those packages.
 Add its repository and asset patterns to `packages.json`, then run the
 `Publish APT repository metadata` workflow. All repositories can use the same
 archive key, with the appropriate user-installed keyring package for each platform.
+Repositories that publish only native Arch packages set `"apt": false` instead
+of a Debian asset pattern. They remain discoverable by the pacman catalogue;
+all other entries still require their configured Debian assets.
 
 The publisher accepts `all`, `amd64`, `arm64`, `aarch64`, and `x86_64` package metadata.
 Use `aarch64` or `x86_64` for native Termux builds in this catalogue and keep their paths

@@ -31,7 +31,9 @@ jobs:
             apt-utils ca-certificates curl dpkg-dev gnupg jq
 
       - name: Test carried-forward package indexing
-        run: bash tests/test-carried-assets.sh
+        run: |
+          bash tests/test-carried-assets.sh
+          bash tests/test-apt-selection.sh
 
       - name: Build and sign repository indexes
         env:

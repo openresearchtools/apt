@@ -412,6 +412,12 @@ while IFS= read -r package_spec; do
     printf 'Invalid configured GitHub repository: %s\n' "$package_repository" >&2
     exit 1
   fi
+  # Native-only repositories remain in the shared pacman discovery manifest.
+  # Only an explicit JSON false disables APT; required Debian assets still fail.
+  if jq -e '.apt == false' >/dev/null <<<"$package_spec"; then
+    printf 'Skipping explicitly disabled APT repository: %s\n' "$package_repository"
+    continue
+  fi
   if [[ -z "$binary_asset_glob" ]]; then
     printf 'No binary_asset_glob configured for %s\n' "$package_repository" >&2
     exit 1
